@@ -43,36 +43,17 @@ if [ "$CONFIRM" != "YES" ]; then
 fi
 
 # --- 🛡️ SAFETY BACKUP PHASE 🛡️ ---
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-SAFE_BACKUP_DIR="./target_pre_restore_backup_$TIMESTAMP"
-SAFE_STORAGE_DIR="$SAFE_BACKUP_DIR/storage"
-
 echo ""
 echo "------------------------------------------------------------"
 echo "🛡️  CREATING SAFETY BACKUP OF TARGET ENVIRONMENT..."
-echo "📂 Saving to: $SAFE_BACKUP_DIR"
 echo "------------------------------------------------------------"
-mkdir -p "$SAFE_STORAGE_DIR"
 
-echo "📦 Dumping Target Roles..."
-supabase db dump --db-url "$TARGET_DB_URL" -f "$SAFE_BACKUP_DIR/roles.sql" --keep-comments --role-only
+# We call the backup script directly, passing the Target URL, Target Remote, and a custom folder prefix!
+./full_backup.sh "$TARGET_DB_URL" "$TARGET_RCLONE_REMOTE" "target_pre_restore_backup"
 
-echo "📦 Dumping Target Schema..."
-supabase db dump --db-url "$TARGET_DB_URL" -f "$SAFE_BACKUP_DIR/schema.sql"
-
-echo "📦 Dumping Target Data (Excluding vector indexes)..."
-supabase db dump --db-url "$TARGET_DB_URL" -f "$SAFE_BACKUP_DIR/data.sql" --use-copy --data-only -T "storage.buckets_vectors" -T "storage.vector_indexes"
-
-echo "🪣 Fetching dynamic list of Target Storage Buckets..."
-TARGET_BUCKETS=$(rclone lsf --dirs-only "$TARGET_RCLONE_REMOTE:" --config "$RCLONE_CONFIG" | sed 's/\/$//')
-
-if [ -n "$TARGET_BUCKETS" ]; then
-  for BUCKET in $TARGET_BUCKETS; do
-    echo "💾 Safely copying target bucket: $BUCKET"
-    rclone copy "$TARGET_RCLONE_REMOTE:$BUCKET" "$SAFE_STORAGE_DIR/$BUCKET" --config "$RCLONE_CONFIG" -P
-  done
-else
-  echo "⚠️ No buckets found in the target to back up."
+if [ $? -ne 0 ]; then
+  echo "❌ Safety backup failed. Aborting restore to protect your target environment."
+  exit 1
 fi
 
 echo "✅ Safety backup complete!"

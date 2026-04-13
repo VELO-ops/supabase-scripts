@@ -1,6 +1,6 @@
 # Supabase Backup & Restore Toolkit
 
-This toolkit provides automated scripts to safely backup and restore an entire Supabase project, including the PostgreSQL database (roles, schema, rows) and all S3-compatible physical storage files via `rclone`.
+This toolkit provides automated, DRY (Don't Repeat Yourself) scripts to safely backup and restore an entire Supabase project. It handles both the PostgreSQL database (roles, schema, rows) using the Supabase CLI, and all S3-compatible physical storage files using `rclone`.
 
 ## Prerequisites
 
@@ -17,7 +17,7 @@ Before using these scripts, ensure you have the following installed:
 1. Duplicate `sample.env` and rename it to `.env`
 2. Retrieve your database connection strings from the Supabase Dashboard:
    - Navigate to **Project Settings** > **Database** > **Connection String (URI)**
-3. Replace the placeholder `<PASSWORD>` with your actual database passwords
+3. Replace the placeholder `<PASSWORD>` with your actual database passwords for both your Production and Target (Test) environments
 
 ### Step 2: Storage Setup
 
@@ -31,45 +31,51 @@ Before using these scripts, ensure you have the following installed:
    - `<SECRET_KEY>`
    - `<REGION>`
 
+> **Security Note:** Both `.env` and `rclone.conf` contain sensitive credentials. Never commit these files to version control.
+
 ## Usage
 
 ### Backup (Production)
 
 To take a full snapshot of your source database and download all storage files:
 
-1. Make the script executable:
+1. Make both scripts executable:
    ```bash
-   chmod +x full_backup.sh
+   chmod +x full_backup.sh full_restore.sh
    ```
 
-2. Run the backup:
+2. Run the backup script:
    ```bash
    ./full_backup.sh
    ```
 
 This generates a timestamped backup directory (e.g., `supabase_backup_20260412_183000`) containing:
-- `.sql` database dumps
+- `.sql` dumps with roles, schema, and data
 - `storage/` subdirectory with all physical storage files
+
+> **Note:** The data dump automatically excludes vector indices to ensure the file remains safely restorable.
 
 ### Restore (Test Environment)
 
 To clone a backup into your target environment:
 
-1. Make the script executable:
-   ```bash
-   chmod +x full_restore.sh
-   ```
+```bash
+./full_restore.sh ./supabase_backup_20260412_183000
+```
 
-2. Run the restore, specifying the backup directory:
-   ```bash
-   ./full_restore.sh ./supabase_backup_20260412_183000
-   ```
+#### Built-in Safety Features
 
-#### Safety Features
+**Confirmation Prompt**
+- The script will request confirmation before executing any destructive actions
 
-The restore script includes multiple safeguards:
+**Automated Safety Snapshot**
+- Before modifying your target database, `full_restore.sh` automatically creates a pre-restore backup (e.g., `target_pre_restore_backup_XYZ`)
+- If anything goes wrong, you have an immediate fallback
 
-- **Confirmation prompt** before execution
-- **Pre-restore backup** of the target environment (automatic recovery point)
-- **Manual pause** to allow you to run database wipe commands (`TRUNCATE`, `DROP SCHEMA`, etc.) before injection
-- **Destructive sync** via `rclone sync` — files in the target bucket that don't exist in the backup will be permanently deleted to ensure a 1:1 clone
+**Manual Wipe Pause**
+- The script pauses before database injection to allow you to run manual wipe commands (`TRUNCATE`, `DROP SCHEMA`, etc.) on the target
+- This gives you fine-grained control over what gets cleared
+
+**1:1 Storage Sync**
+- Storage restores use `rclone sync`, which means any files in the target bucket that don't exist in the backup will be permanently deleted
+- Ensures a perfect 1:1 clone with no orphaned files

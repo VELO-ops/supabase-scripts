@@ -2,36 +2,37 @@
 
 # --- Load Environment Variables ---
 if [ -f .env ]; then
-  # Read .env file, ignoring comments, and export variables
   export $(grep -v '^#' .env | xargs)
 else
   echo "❌ Error: .env file not found. Please copy sample.env to .env and configure it."
   exit 1
 fi
 
-# --- Configuration ---
-RCLONE_REMOTE="prod-supa"
+# --- Configuration (Allows overrides from full_restore.sh) ---
+DB_URL=${1:-$PROD_DB_URL}
+RCLONE_REMOTE=${2:-"prod-supa"}
+FOLDER_PREFIX=${3:-"supabase_backup"}
 RCLONE_CONFIG="./rclone.conf"
 
 # --- Setup Directory ---
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-BACKUP_DIR="./supabase_backup_$TIMESTAMP"
+BACKUP_DIR="./${FOLDER_PREFIX}_${TIMESTAMP}"
 STORAGE_DIR="$BACKUP_DIR/storage"
 
 mkdir -p "$STORAGE_DIR"
 
-echo "🚀 Starting Full Supabase Backup to $BACKUP_DIR..."
+echo "🚀 Starting Backup to $BACKUP_DIR..."
 echo "------------------------------------------------------------"
 
 # --- 1. Database Dumps ---
 echo "📦 Dumping Roles..."
-supabase db dump --db-url "$PROD_DB_URL" -f "$BACKUP_DIR/roles.sql" --keep-comments --role-only
+supabase db dump --db-url "$DB_URL" -f "$BACKUP_DIR/roles.sql" --keep-comments --role-only
 
 echo "📦 Dumping Schema..."
-supabase db dump --db-url "$PROD_DB_URL" -f "$BACKUP_DIR/schema.sql"
+supabase db dump --db-url "$DB_URL" -f "$BACKUP_DIR/schema.sql"
 
 echo "📦 Dumping Data (Excluding vector indexes)..."
-supabase db dump --db-url "$PROD_DB_URL" -f "$BACKUP_DIR/data.sql" --use-copy --data-only -T "storage.buckets_vectors" -T "storage.vector_indexes"
+supabase db dump --db-url "$DB_URL" -f "$BACKUP_DIR/data.sql" --use-copy --data-only --exclude "storage.buckets_vectors,storage.vector_indexes"
 
 echo "------------------------------------------------------------"
 echo "🪣 Fetching dynamic list of Storage Buckets..."
@@ -56,5 +57,5 @@ else
 fi
 
 echo "------------------------------------------------------------"
-echo "🎉 Full backup completed successfully!"
+echo "🎉 Backup completed successfully!"
 echo "📂 All files are securely saved in: $BACKUP_DIR"
