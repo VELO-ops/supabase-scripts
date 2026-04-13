@@ -60,7 +60,11 @@ This generates a timestamped backup directory (e.g., `backups/supabase_backup_20
 To clone a backup into your target environment:
 
 ```bash
-./full_restore.sh ./backups/supabase_backup_20260412_183000
+# Target environment: test
+./full_restore.sh test ./backups/supabase_backup_20260412_183000
+
+# Target environment: prod
+./full_restore.sh prod ./backups/supabase_backup_20260412_183000
 ```
 
 #### Built-in Safety Features
