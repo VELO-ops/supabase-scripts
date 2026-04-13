@@ -49,7 +49,7 @@ To take a full snapshot of your source database and download all storage files:
    ./full_backup.sh
    ```
 
-This generates a timestamped backup directory (e.g., `supabase_backup_20260412_183000`) containing:
+This generates a timestamped backup directory (e.g., `backups/supabase_backup_20260412_183000`) containing:
 - `.sql` dumps with roles, schema, and data
 - `storage/` subdirectory with all physical storage files
 
@@ -60,7 +60,7 @@ This generates a timestamped backup directory (e.g., `supabase_backup_20260412_1
 To clone a backup into your target environment:
 
 ```bash
-./full_restore.sh ./supabase_backup_20260412_183000
+./full_restore.sh ./backups/supabase_backup_20260412_183000
 ```
 
 #### Built-in Safety Features

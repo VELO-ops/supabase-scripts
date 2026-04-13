@@ -16,9 +16,10 @@ RCLONE_CONFIG="./rclone.conf"
 
 # --- Setup Directory ---
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-BACKUP_DIR="./${FOLDER_PREFIX}_${TIMESTAMP}"
+BACKUP_DIR="./backups/${FOLDER_PREFIX}_${TIMESTAMP}"
 STORAGE_DIR="$BACKUP_DIR/storage"
 
+# Note: mkdir -p is smart enough to automatically create the master backups/ folder if it doesn't exist yet!
 mkdir -p "$STORAGE_DIR"
 
 echo "🚀 Starting Backup to $BACKUP_DIR..."
