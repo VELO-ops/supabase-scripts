@@ -35,18 +35,24 @@ Before using these scripts, ensure you have the following installed:
 
 ## Usage
 
-### Backup (Production)
+### Backup
 
-To take a full snapshot of your source database and download all storage files:
+To take a full snapshot of either database and download all storage files:
 
 1. Make both scripts executable:
    ```bash
    chmod +x full_backup.sh full_restore.sh
    ```
 
-2. Run the backup script:
+2. Run the backup script. To backup `prod`:
    ```bash
-   ./full_backup.sh
+   ./full_backup.sh # Be implicit; prod is the default target backed up
+   ./full_backup.sh prod # Or be explicit
+   ```
+
+   Or to backup `test`:
+   ```bash
+   ./full_backup.sh test 
    ```
 
 This generates a timestamped backup directory (e.g., `backups/supabase_backup_20260412_183000`) containing:
@@ -55,7 +61,7 @@ This generates a timestamped backup directory (e.g., `backups/supabase_backup_20
 
 > **Note:** The data dump automatically excludes vector indices to ensure the file remains safely restorable.
 
-### Restore (Test Environment)
+### Restore
 
 To clone a backup into your target environment:
 
