@@ -51,7 +51,7 @@ else
   # --- 3. Loop and Backup ---
   for BUCKET in $BUCKETS; do
     echo "💾 Backing up bucket: $BUCKET"
-    rclone copy "$RCLONE_REMOTE:$BUCKET" "$STORAGE_DIR/$BUCKET" --config "$RCLONE_CONFIG" -P
+    rclone copy "$RCLONE_REMOTE:$BUCKET" "$STORAGE_DIR/$BUCKET" --config "$RCLONE_CONFIG" -P --size-only --no-update-modtime
     echo "✅ Finished $BUCKET"
     echo ""
   done

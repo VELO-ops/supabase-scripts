@@ -115,7 +115,7 @@ if [ -d "$BACKUP_DIR/storage" ]; then
     if [ -d "$BUCKET_PATH" ]; then
       BUCKET=$(basename "$BUCKET_PATH")
       echo "🔄 Syncing bucket: $BUCKET"
-      rclone sync "$BUCKET_PATH" "$TARGET_RCLONE_REMOTE:$BUCKET" --config "$RCLONE_CONFIG" -P
+      rclone sync "$BUCKET_PATH" "$TARGET_RCLONE_REMOTE:$BUCKET" --config "$RCLONE_CONFIG" -P --size-only --no-update-modtime
       echo "✅ Finished syncing $BUCKET"
       echo ""
     fi
