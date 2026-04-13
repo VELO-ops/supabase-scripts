@@ -103,8 +103,11 @@ echo "------------------------------------------------------------"
 echo "📦 Restoring Roles..."
 psql -d "$TARGET_DB_URL" -f "$BACKUP_DIR/roles.sql"
 
-echo "📦 Restoring Schema..."
-psql -d "$TARGET_DB_URL" -f "$BACKUP_DIR/schema.sql"
+echo "🔗 Patching Webhooks in Schema and Restoring on the fly..."
+cat "$BACKUP_DIR/schema.sql" \
+  | sed "s/$PROD_REF\.supabase\.co/$TARGET_REF\.supabase\.co/g" \
+  | sed "s/$TEST_REF\.supabase\.co/$TARGET_REF\.supabase\.co/g" \
+  | psql -d "$TARGET_DB_URL"
 
 echo "🔗 Patching Storage URLs and Restoring Data on the fly..."
 # Reads the file -> Patches URLs in memory -> Injects directly to the database!
