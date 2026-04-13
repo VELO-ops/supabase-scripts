@@ -1,0 +1,17 @@
+[prod-supa]
+type = s3
+provider = Other
+access_key_id = <PROD_ACCESS_KEY>
+secret_access_key = <PROD_SECRET_KEY>
+endpoint = https://<PROD_PROJECT_ID>.supabase.co/storage/v1/s3
+region = <PROD_REGION>
+force_path_style = true
+
+[test-supa]
+type = s3
+provider = Other
+access_key_id = <TEST_ACCESS_KEY>
+secret_access_key = <TEST_SECRET_KEY>
+endpoint = https://<TEST_PROJECT_ID>.supabase.co/storage/v1/s3
+region = <TEST_REGION>
+force_path_style = true
