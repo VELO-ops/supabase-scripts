@@ -18,7 +18,6 @@ Before using these scripts, ensure you have the following installed:
 2. Retrieve your database connection strings from the Supabase Dashboard:
    - Navigate to **Project Settings** > **Database** > **Connection String (URI)**
 3. Replace the placeholder `<PASSWORD>` with your actual database passwords
-4. Add `.env` to `.gitignore` to prevent credential leaks
 
 ### Step 2: Storage Setup
 
@@ -31,7 +30,6 @@ Before using these scripts, ensure you have the following installed:
    - `<ACCESS_KEY>`
    - `<SECRET_KEY>`
    - `<REGION>`
-4. Add `rclone.conf` to `.gitignore` to prevent credential leaks
 
 ## Usage
 
