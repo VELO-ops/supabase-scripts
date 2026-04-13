@@ -30,11 +30,13 @@ RCLONE_CONFIG="./rclone.conf"
 if [ "$ENV_TARGET" == "prod" ]; then
   TARGET_DB_URL=$PROD_DB_URL
   TARGET_RCLONE_REMOTE="prod-supa"
+  TARGET_REF=$PROD_REF
   WARNING_MSG="🔥 DANGER: YOU ARE ABOUT TO WIPE AND OVERWRITE PRODUCTION! 🔥"
   CONFIRM_WORD="I UNDERSTAND"
 else
   TARGET_DB_URL=$TEST_DB_URL
   TARGET_RCLONE_REMOTE="test-supa"
+  TARGET_REF=$TEST_REF
   WARNING_MSG="🚨 WARNING: DESTRUCTIVE RESTORE TO TEST INITIATED 🚨"
   CONFIRM_WORD="YES"
 fi
@@ -104,8 +106,15 @@ psql -d "$TARGET_DB_URL" -f "$BACKUP_DIR/roles.sql"
 echo "📦 Restoring Schema..."
 psql -d "$TARGET_DB_URL" -f "$BACKUP_DIR/schema.sql"
 
-echo "📦 Restoring Data..."
-psql -d "$TARGET_DB_URL" -f "$BACKUP_DIR/data.sql"
+echo "🔗 Patching Storage URLs and Restoring Data on the fly..."
+# Reads the file -> Patches URLs in memory -> Injects directly to the database!
+cat "$BACKUP_DIR/data.sql" \
+  | sed "s/$PROD_REF\.supabase\.co/$TARGET_REF\.supabase\.co/g" \
+  | sed "s/$TEST_REF\.supabase\.co/$TARGET_REF\.supabase\.co/g" \
+  | psql -d "$TARGET_DB_URL"
+
+echo "📦 Restoring Patched Data..."
+psql -d "$TARGET_DB_URL" -f "$BACKUP_DIR/data_patched.sql"
 
 echo "------------------------------------------------------------"
 echo "🪣 Restoring Storage Buckets (Syncing)..."

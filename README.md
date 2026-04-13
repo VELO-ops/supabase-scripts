@@ -1,10 +1,14 @@
 # Supabase Backup & Restore Toolkit
 
-This toolkit provides automated, DRY (Don't Repeat Yourself) scripts to safely backup and restore an entire Supabase project. It handles both the PostgreSQL database (roles, schema, rows) using the Supabase CLI, and all S3-compatible physical storage files using `rclone`.
+This toolkit provides automated, DRY scripts to safely backup and restore an entire Supabase project. It handles the PostgreSQL database (roles, schema, rows) via the Supabase CLI, and all S3-compatible physical storage files via `rclone`.
+
+## Key Features
+
+- **Cross-Environment Migrations:** Seamlessly move data between Test and Prod
+- **On-the-Fly URL Patching:** Storage URLs inside your database are dynamically rewritten during a restore to match the target environment (no broken images!)
+- **Automated Safety Nets:** Restores automatically trigger a pre-restore safety snapshot of the target environment before executing
 
 ## Prerequisites
-
-Before using these scripts, ensure you have the following installed:
 
 - [Supabase CLI](https://supabase.com/docs/guides/cli) (`brew install supabase/tap/supabase`)
 - [Rclone](https://rclone.org/) (`brew install rclone`)
@@ -17,71 +21,75 @@ Before using these scripts, ensure you have the following installed:
 1. Duplicate `sample.env` and rename it to `.env`
 2. Retrieve your database connection strings from the Supabase Dashboard:
    - Navigate to **Project Settings** > **Database** > **Connection String (URI)**
-3. Replace the placeholder `<PASSWORD>` with your actual database passwords for both your Production and Target (Test) environments
+3. Locate your 20-character Project Reference IDs in your Supabase Dashboard URLs (e.g., `https://supabase.com/dashboard/project/<PROJECT_REF>`)
+4. Fill in the `.env` file with your credentials:
+
+```env
+PROD_DB_URL="postgresql://postgres.<PROD_REF>:<PASSWORD>@<PROD_REGION>.pooler.supabase.com:5432/postgres"
+TEST_DB_URL="postgresql://postgres.<TEST_REF>:<PASSWORD>@<TEST_REGION>.pooler.supabase.com:5432/postgres"
+
+PROD_REF="<PROD_REF>"
+TEST_REF="<TEST_REF>"
+```
 
 ### Step 2: Storage Setup
 
 1. Duplicate `rclone.conf.template` and rename it to `rclone.conf`
 2. Generate S3 credentials in the Supabase Dashboard:
    - Navigate to **Project Settings** > **Storage** > **S3 Connection**
-   - Generate a new Access Key for both your Production (Source) and Target (Test) environments
+   - Generate a new Access Key for both environments
 3. Fill in the following fields in `rclone.conf`:
    - `<PROJECT_ID>`
    - `<ACCESS_KEY>`
    - `<SECRET_KEY>`
    - `<REGION>`
 
-> **Security Note:** Both `.env` and `rclone.conf` contain sensitive credentials. Never commit these files to version control.
+> **Security Note:** Ensure `.env` and `rclone.conf` are in your `.gitignore` to prevent credential leaks. These files contain sensitive database passwords and S3 keys.
+
+### Step 3: Executables
+
+1. Make the scripts executable:
+   ```bash
+   chmod +x full_backup.sh full_restore.sh
+   ```
 
 ## Usage
 
 ### Backup
 
-To take a full snapshot of either database and download all storage files:
-
-1. Make both scripts executable:
+Backups are dynamically generated and saved inside a master `./backups/` directory.
+Run the backup script with your target environment:
    ```bash
-   chmod +x full_backup.sh full_restore.sh
+   # Backup Production (default)
+   ./full_backup.sh prod
+
+   # Backup Test
+   ./full_backup.sh test
    ```
 
-2. Run the backup script. To backup `prod`:
-   ```bash
-   ./full_backup.sh # Be implicit; prod is the default target backed up
-   ./full_backup.sh prod # Or be explicit
-   ```
-
-   Or to backup `test`:
-   ```bash
-   ./full_backup.sh test 
-   ```
-
-This generates a timestamped backup directory (e.g., `backups/supabase_backup_20260412_183000`) containing:
-- `.sql` dumps with roles, schema, and data
+This generates a nested, timestamped folder (e.g., `./backups/prod_backup_20260413_083000`) containing:
+- `.sql` database dumps
 - `storage/` subdirectory with all physical storage files
 
-> **Note:** The data dump automatically excludes vector indices to ensure the file remains safely restorable.
+### Restore (or Migrate)
 
-### Restore
+You can restore a backup to its original environment, or cross-migrate data between environments (e.g., pulling Prod down to Test).
 
-To clone a backup into your target environment:
+Run the restore script, specifying the target environment and backup folder:
+   ```bash
+   # Clone a backup into Test
+   ./full_restore.sh test ./backups/prod_backup_20260413_083000
 
-```bash
-# Target environment: test
-./full_restore.sh test ./backups/supabase_backup_20260412_183000
+   # Promote a backup into Production
+   ./full_restore.sh prod ./backups/test_backup_20260413_091500
+   ```
 
-# Target environment: prod
-./full_restore.sh prod ./backups/supabase_backup_20260412_183000
-```
+#### Restore Workflow
 
-#### Built-in Safety Features
+The restore process executes the following steps:
 
-**Confirmation Prompt**
-- The script will request confirmation before executing any destructive actions
-
-**Automated Safety Snapshot**
-- Before modifying your target database, `full_restore.sh` automatically creates a pre-restore backup (e.g., `target_pre_restore_backup_XYZ`)
-- If anything goes wrong, you have an immediate fallback
-
-**1:1 Storage Sync**
-- Storage restores use `rclone sync`, which means any files in the target bucket that don't exist in the backup will be permanently deleted
-- Ensures a perfect 1:1 clone with no orphaned files
+1. **Confirmation:** Prompts to ensure you intend to overwrite the target environment
+2. **Safety Snapshot:** Automatically backs up the current state of the target environment to `./backups/target_pre_restore_backup_...`
+3. **Automated Wipe:** Safely drops the target's `public` schema and truncates `auth` and `storage` tables
+4. **URL Patching & Injection:** Streams the `.sql` data directly into the database, dynamically replacing any old Supabase Project IDs with the new Target Project ID in memory
+5. **Physical Sync:** Syncs physical S3 files, forcefully resolving any orphaned metadata
