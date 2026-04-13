@@ -76,10 +76,6 @@ To clone a backup into your target environment:
 - Before modifying your target database, `full_restore.sh` automatically creates a pre-restore backup (e.g., `target_pre_restore_backup_XYZ`)
 - If anything goes wrong, you have an immediate fallback
 
-**Manual Wipe Pause**
-- The script pauses before database injection to allow you to run manual wipe commands (`TRUNCATE`, `DROP SCHEMA`, etc.) on the target
-- This gives you fine-grained control over what gets cleared
-
 **1:1 Storage Sync**
 - Storage restores use `rclone sync`, which means any files in the target bucket that don't exist in the backup will be permanently deleted
 - Ensures a perfect 1:1 clone with no orphaned files
