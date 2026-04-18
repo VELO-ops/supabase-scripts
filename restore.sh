@@ -30,15 +30,22 @@ RCLONE_CONFIG="./rclone.conf"
 if [ "$ENV_TARGET" == "prod" ]; then
   TARGET_DB_URL=$PROD_DB_URL
   TARGET_RCLONE_REMOTE="prod-supa"
-  TARGET_REF=$PROD_REF
   WARNING_MSG="🔥 DANGER: YOU ARE ABOUT TO WIPE AND OVERWRITE PRODUCTION! 🔥"
   CONFIRM_WORD="I UNDERSTAND"
 else
   TARGET_DB_URL=$TEST_DB_URL
   TARGET_RCLONE_REMOTE="test-supa"
-  TARGET_REF=$TEST_REF
   WARNING_MSG="🚨 WARNING: DESTRUCTIVE RESTORE TO TEST INITIATED 🚨"
   CONFIRM_WORD="YES"
+fi
+
+# 🎯 Extract the 20-character Target Project ID from the Database URL
+if [[ "$TARGET_DB_URL" =~ postgres\.([^:]+) ]]; then
+  TARGET_ID="${BASH_REMATCH[1]}"
+  echo "🔍 Auto-detected Target Project ID: $TARGET_ID"
+else
+  echo "❌ Error: Could not extract Project ID from the target DB URL."
+  exit 1
 fi
 
 # --- 🚨 WARNING 🚨 ---
@@ -104,16 +111,14 @@ echo "📦 Restoring Roles..."
 psql -d "$TARGET_DB_URL" -f "$BACKUP_DIR/roles.sql"
 
 echo "🔗 Patching Webhooks in Schema and Restoring on the fly..."
+# Finds ANY 20-character Supabase ID and replaces it with the Target ID
 cat "$BACKUP_DIR/schema.sql" \
-  | sed "s/$PROD_REF\.supabase\.co/$TARGET_REF\.supabase\.co/g" \
-  | sed "s/$TEST_REF\.supabase\.co/$TARGET_REF\.supabase\.co/g" \
+  | sed -E "s/[a-z0-9]{20}\.supabase\.co/$TARGET_ID\.supabase\.co/g" \
   | psql -d "$TARGET_DB_URL"
 
-echo "🔗 Patching Storage URLs and Restoring Data on the fly..."
-# Reads the file -> Patches URLs in memory -> Injects directly to the database!
+echo "🔗 Patching URLs in Data and Restoring on the fly..."
 cat "$BACKUP_DIR/data.sql" \
-  | sed "s/$PROD_REF\.supabase\.co/$TARGET_REF\.supabase\.co/g" \
-  | sed "s/$TEST_REF\.supabase\.co/$TARGET_REF\.supabase\.co/g" \
+  | sed -E "s/[a-z0-9]{20}\.supabase\.co/$TARGET_ID\.supabase\.co/g" \
   | psql -d "$TARGET_DB_URL"
 
 echo "📦 Restoring Patched Data..."
