@@ -27,7 +27,7 @@ set -- "${POSITIONAL_ARGS[@]}"
 # --- Configuration ---
 RCLONE_CONFIG="./rclone.conf"
 
-# 1. Automated override (Used when full_restore.sh calls this script with 3 exact arguments)
+# 1. Automated override (Used when restore.sh calls this script with 3 exact arguments)
 if [ $# -eq 3 ]; then
   DB_URL=$1
   RCLONE_REMOTE=$2

@@ -54,20 +54,20 @@ Backups are dynamically generated and saved inside a master `./backups/` directo
 Run the script with no arguments to be prompted for an environment or a custom database URL:
 
 ```bash
-./full_backup.sh
+./backup.sh
 ```
 
 ### Quick Commands
 
 ```bash
 # Backup Production
-./full_backup.sh prod
+./backup.sh prod
 
 # Backup Test
-./full_backup.sh test
+./backup.sh test
 
 # Backup a brand new/custom project on the fly
-./full_backup.sh postgresql://postgres.xyz...:PASSWORD@...
+./backup.sh postgresql://postgres.xyz...:PASSWORD@...
 ```
 
 ### Backup Flags
@@ -75,22 +75,22 @@ Run the script with no arguments to be prompted for an environment or a custom d
 Add `--db-only` anywhere in your command to skip the physical S3 storage sync and only snapshot your database (Roles, Schema, and Data).
 
 ```bash
-./full_backup.sh prod --db-only
+./backup.sh prod --db-only
 ```
 
 ## 💥 How to Restore (or Migrate)
 
 You can restore a backup to its original environment, or cross-migrate data between environments.
 
-1. Ensure the script is executable: `chmod +x full_restore.sh`
+1. Ensure the script is executable: `chmod +x restore.sh`
 2. Run the script, passing the target environment and the specific backup folder:
 
 ```bash
 # Clone a backup INTO Test
-./full_restore.sh test ./backups/prod_backup_20260413_083000
+./restore.sh test ./backups/prod_backup_20260413_083000
 
 # Promote a backup INTO Production
-./full_restore.sh prod ./backups/test_backup_20260413_091500
+./restore.sh prod ./backups/test_backup_20260413_091500
 ```
 
 ### Restore Flags
@@ -98,7 +98,7 @@ You can restore a backup to its original environment, or cross-migrate data betw
 Add `--schema-only` to inject the pure structure of your database (Roles, Schema, Constraints, Webhooks) while explicitly skipping dummy table rows and dummy S3 images. Perfect for pre-launch production syncing!
 
 ```bash
-./full_restore.sh prod ./backups/test_backup_XYZ --schema-only
+./restore.sh prod ./backups/test_backup_XYZ --schema-only
 ```
 
 **Caveat:** Because Supabase Buckets are stored as data rows, a `--schema-only` restore will not recreate your buckets. The script will output a handy list of buckets you need to manually recreate via the Dashboard when it finishes.

@@ -29,13 +29,13 @@ BACKUP_DIR=$2
 
 if [[ "$ENV_TARGET" != "test" && "$ENV_TARGET" != "prod" ]]; then
   echo "❌ Error: First argument must be 'test' or 'prod'."
-  echo "Usage: ./full_restore.sh <test|prod> <backup_dir> [--schema-only]"
+  echo "Usage: ./restore.sh <test|prod> <backup_dir> [--schema-only]"
   exit 1
 fi
 
 if [ -z "$BACKUP_DIR" ] || [ ! -d "$BACKUP_DIR" ]; then
   echo "❌ Error: Invalid or missing backup directory."
-  echo "Usage: ./full_restore.sh test ./backups/supabase_backup_XYZ"
+  echo "Usage: ./restore.sh test ./backups/supabase_backup_XYZ"
   exit 1
 fi
 
@@ -92,7 +92,7 @@ echo "------------------------------------------------------------"
 echo "🛡️  CREATING SAFETY BACKUP OF $ENV_TARGET ENVIRONMENT..."
 echo "------------------------------------------------------------"
 
-./full_backup.sh "$TARGET_DB_URL" "$TARGET_RCLONE_REMOTE" "${ENV_TARGET}_pre_restore_backup"
+./backup.sh "$TARGET_DB_URL" "$TARGET_RCLONE_REMOTE" "${ENV_TARGET}_pre_restore_backup"
 
 if [ $? -ne 0 ]; then
   echo "❌ Safety backup failed! Aborting to protect your environment."
