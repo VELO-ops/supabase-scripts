@@ -8,6 +8,22 @@ else
   exit 1
 fi
 
+# --- Parse Flags ---
+SKIP_STORAGE=false
+POSITIONAL_ARGS=()
+
+# Loop through all arguments passed to the script
+for arg in "$@"; do
+  if [ "$arg" == "--db-only" ]; then
+    SKIP_STORAGE=true
+  else
+    POSITIONAL_ARGS+=("$arg") # Save non-flag arguments
+  fi
+done
+
+# Reassign the remaining arguments so the rest of the script functions normally
+set -- "${POSITIONAL_ARGS[@]}"
+
 # --- Configuration ---
 RCLONE_CONFIG="./rclone.conf"
 
@@ -46,7 +62,6 @@ else
     read -p "Enter the rclone remote name from your rclone.conf (e.g., clientA-supa): " RCLONE_REMOTE
     read -p "Enter a prefix for the backup folder (e.g., clientA_backup): " FOLDER_PREFIX
     
-    # Quick validation so the script doesn't break later
     if [ -z "$RCLONE_REMOTE" ] || [ -z "$FOLDER_PREFIX" ]; then
       echo "❌ Error: Rclone remote and folder prefix are required for custom URLs."
       exit 1
@@ -58,15 +73,14 @@ else
 fi
 
 # --- Setup Directory ---
-# ... (the rest of the script continues normally from here)
-
-# --- Setup Directory ---
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 BACKUP_DIR="./backups/${FOLDER_PREFIX}_${TIMESTAMP}"
 STORAGE_DIR="$BACKUP_DIR/storage"
 
-# Note: mkdir -p is smart enough to automatically create the master backups/ folder if it doesn't exist yet!
-mkdir -p "$STORAGE_DIR"
+mkdir -p "$BACKUP_DIR"
+if [ "$SKIP_STORAGE" = false ]; then
+  mkdir -p "$STORAGE_DIR"
+fi
 
 echo "🚀 Starting Backup to $BACKUP_DIR..."
 echo "------------------------------------------------------------"
@@ -81,26 +95,30 @@ supabase db dump --db-url "$DB_URL" -f "$BACKUP_DIR/schema.sql"
 echo "📦 Dumping Data (Excluding vector indexes)..."
 supabase db dump --db-url "$DB_URL" -f "$BACKUP_DIR/data.sql" --use-copy --data-only --exclude "storage.buckets_vectors,storage.vector_indexes"
 
-echo "------------------------------------------------------------"
-echo "🪣 Fetching dynamic list of Storage Buckets..."
-
-# --- 2. Dynamically Fetch Buckets ---
-BUCKETS=$(rclone lsf --dirs-only "$RCLONE_REMOTE:" --config "$RCLONE_CONFIG" | sed 's/\/$//')
-
-if [ -z "$BUCKETS" ]; then
-  echo "⚠️ No buckets found or rclone could not connect."
-else
-  echo "Found the following buckets:"
-  echo "$BUCKETS"
+# --- 2. Storage Backup ---
+if [ "$SKIP_STORAGE" = true ]; then
   echo "------------------------------------------------------------"
+  echo "⏭️  --db-only flag detected. Skipping S3 Storage Buckets."
+else
+  echo "------------------------------------------------------------"
+  echo "🪣 Fetching dynamic list of Storage Buckets..."
 
-  # --- 3. Loop and Backup ---
-  for BUCKET in $BUCKETS; do
-    echo "💾 Backing up bucket: $BUCKET"
-    rclone copy "$RCLONE_REMOTE:$BUCKET" "$STORAGE_DIR/$BUCKET" --config "$RCLONE_CONFIG" -P --size-only --no-update-modtime --retries 1
-    echo "✅ Finished $BUCKET"
-    echo ""
-  done
+  BUCKETS=$(rclone lsf --dirs-only "$RCLONE_REMOTE:" --config "$RCLONE_CONFIG" | sed 's/\/$//')
+
+  if [ -z "$BUCKETS" ]; then
+    echo "⚠️ No buckets found or rclone could not connect."
+  else
+    echo "Found the following buckets:"
+    echo "$BUCKETS"
+    echo "------------------------------------------------------------"
+
+    for BUCKET in $BUCKETS; do
+      echo "💾 Backing up bucket: $BUCKET"
+      rclone copy "$RCLONE_REMOTE:$BUCKET" "$STORAGE_DIR/$BUCKET" --config "$RCLONE_CONFIG" -P --size-only --no-update-modtime --retries 1
+      echo "✅ Finished $BUCKET"
+      echo ""
+    done
+  fi
 fi
 
 echo "------------------------------------------------------------"
