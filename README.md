@@ -8,7 +8,7 @@ This toolkit provides automated, DRY scripts to safely backup and restore an ent
 - **Smart Remote Detection:** Automatically parses your DB URL to find the matching S3 credentials in your `rclone.conf`.
 - **Universal URL Patching:** Uses Regex to dynamically rewrite _any_ Supabase project ID (in file URLs, Webhooks, or API endpoints) during a restore to perfectly match the target environment.
 - **Automated Safety Nets:** Restores automatically trigger a pre-restore safety snapshot of the target environment before executing.
-- **Targeted Backups:** Skip heavy S3 file downloads using the `--db-only` flag when you just need to snapshot your schema or data.
+- **Targeted Operations:** Skip heavy data/file syncs using the `--schema-only` (restore) or `--db-only` (backup) flags.
 
 ## ⚠️ Prerequisites
 
@@ -31,13 +31,11 @@ TEST_DB_URL="postgresql://postgres.<TEST_REF>:<PASSWORD>@<TEST_REGION>.pooler.su
 ## 🪣 Step 2: Storage Setup
 
 1. Duplicate `rclone.conf.template` and rename it to `rclone.conf`.
-2. Generate your S3 credentials in the Supabase Dashboard: **Project Settings > Storage > S3 Connection**.
+2. Generate your S3 credentials in the Supabase Dashboard: Project Settings > Storage > S3 Connection.
 3. Generate a new Access Key for each environment you want to backup.
 4. Fill in the `<PROJECT_ID>`, `<ACCESS_KEY>`, `<SECRET_KEY>`, and `<REGION>` fields in `rclone.conf`.
 
-### 🚨 Security Note
-
-Ensure `.env` and `rclone.conf` are in your `.gitignore` to prevent credential leaks!
+**🚨 Security Note:** Ensure `.env` and `rclone.conf` are in your `.gitignore` to prevent credential leaks!
 
 ## ⚡ Step 3: Executables
 
@@ -72,7 +70,7 @@ Run the script with no arguments to be prompted for an environment or a custom d
 ./full_backup.sh postgresql://postgres.xyz...:PASSWORD@...
 ```
 
-### Flags
+### Backup Flags
 
 Add `--db-only` anywhere in your command to skip the physical S3 storage sync and only snapshot your database (Roles, Schema, and Data).
 
@@ -82,9 +80,10 @@ Add `--db-only` anywhere in your command to skip the physical S3 storage sync an
 
 ## 💥 How to Restore (or Migrate)
 
-You can restore a backup to its original environment, or cross-migrate data between environments (e.g., pulling Prod down to Test).
+You can restore a backup to its original environment, or cross-migrate data between environments.
 
-Run the script, passing the target environment and the specific backup folder:
+1. Ensure the script is executable: `chmod +x full_restore.sh`
+2. Run the script, passing the target environment and the specific backup folder:
 
 ```bash
 # Clone a backup INTO Test
@@ -93,6 +92,16 @@ Run the script, passing the target environment and the specific backup folder:
 # Promote a backup INTO Production
 ./full_restore.sh prod ./backups/test_backup_20260413_091500
 ```
+
+### Restore Flags
+
+Add `--schema-only` to inject the pure structure of your database (Roles, Schema, Constraints, Webhooks) while explicitly skipping dummy table rows and dummy S3 images. Perfect for pre-launch production syncing!
+
+```bash
+./full_restore.sh prod ./backups/test_backup_XYZ --schema-only
+```
+
+**Caveat:** Because Supabase Buckets are stored as data rows, a `--schema-only` restore will not recreate your buckets. The script will output a handy list of buckets you need to manually recreate via the Dashboard when it finishes.
 
 ### What Happens During a Restore?
 
