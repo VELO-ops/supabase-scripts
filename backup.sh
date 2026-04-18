@@ -22,7 +22,7 @@ elif [ "$1" == "prod" ] || [ -z "$1" ]; then
   RCLONE_REMOTE="prod-supa"
   FOLDER_PREFIX="prod_backup"
 else
-  # Automated override (Used when full_restore.sh calls this script)
+  # Automated override (Used when restore.sh calls this script)
   DB_URL=$1
   RCLONE_REMOTE=$2
   FOLDER_PREFIX=$3

@@ -50,7 +50,7 @@ TEST_REF="<TEST_REF>"
 
 1. Make the scripts executable:
    ```bash
-   chmod +x full_backup.sh full_restore.sh
+   chmod +x backup.sh restore.sh
    ```
 
 ## Usage
@@ -59,15 +59,17 @@ TEST_REF="<TEST_REF>"
 
 Backups are dynamically generated and saved inside a master `./backups/` directory.
 Run the backup script with your target environment:
-   ```bash
-   # Backup Production (default)
-   ./full_backup.sh prod
 
-   # Backup Test
-   ./full_backup.sh test
-   ```
+```bash
+# Backup Production (default)
+./backup.sh prod
+
+# Backup Test
+./backup.sh test
+```
 
 This generates a nested, timestamped folder (e.g., `./backups/prod_backup_20260413_083000`) containing:
+
 - `.sql` database dumps
 - `storage/` subdirectory with all physical storage files
 
@@ -76,13 +78,14 @@ This generates a nested, timestamped folder (e.g., `./backups/prod_backup_202604
 You can restore a backup to its original environment, or cross-migrate data between environments (e.g., pulling Prod down to Test).
 
 Run the restore script, specifying the target environment and backup folder:
-   ```bash
-   # Clone a backup into Test
-   ./full_restore.sh test ./backups/prod_backup_20260413_083000
 
-   # Promote a backup into Production
-   ./full_restore.sh prod ./backups/test_backup_20260413_091500
-   ```
+```bash
+# Clone a backup into Test
+./restore.sh test ./backups/prod_backup_20260413_083000
+
+# Promote a backup into Production
+./restore.sh prod ./backups/test_backup_20260413_091500
+```
 
 #### Restore Workflow
 
