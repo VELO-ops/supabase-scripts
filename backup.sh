@@ -60,7 +60,6 @@ else
     echo "🔗 Custom Database URL detected."
 
     # 1. Extract Project ID from the Postgres URL
-    # Format: postgresql://postgres.<PROJECT_ID>:<PASSWORD>@...
     if [[ "$DB_URL" =~ postgres\.([^:]+) ]]; then
       PROJECT_ID="${BASH_REMATCH[1]}"
       echo "🔍 Extracted Project ID: $PROJECT_ID"
@@ -89,6 +88,11 @@ else
       echo "❌ Error: Rclone remote and folder prefix are required."
       exit 1
     fi
+  else
+    echo "❌ Error: Invalid input. Must be 'prod', 'test', or a valid postgresql:// URL."
+    exit 1
+  fi
+fi
 
 # --- Setup Directory ---
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)

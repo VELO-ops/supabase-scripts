@@ -121,9 +121,6 @@ cat "$BACKUP_DIR/data.sql" \
   | sed -E "s/[a-z0-9]{20}\.supabase\.co/$TARGET_ID\.supabase\.co/g" \
   | psql -d "$TARGET_DB_URL"
 
-echo "📦 Restoring Patched Data..."
-psql -d "$TARGET_DB_URL" -f "$BACKUP_DIR/data_patched.sql"
-
 echo "------------------------------------------------------------"
 echo "🪣 Restoring Storage Buckets (Syncing)..."
 
