@@ -161,11 +161,11 @@ if [ "$SCHEMA_ONLY" = false ]; then
       fi
     done
   else
-    echo "⚠️ No storage/ directory found in the backup. Skipping physical file restore."
+    echo "⚠️ No storage/ directory found in the backup. Skipping physical file restore.\n\n"
   fi
 else
   echo "------------------------------------------------------------"
-  echo "⏭️  --schema-only flag detected. Skipping S3 physical file sync."
+  echo "⏭️  --schema-only flag detected. Skipping S3 physical file sync.\n\n"
 fi
 
 # --- ⚠️ Manual Action Prompt for Schema-Only ---
@@ -179,14 +179,14 @@ if [ "$SCHEMA_ONLY" = true ]; then
   echo "Please log into the Supabase Dashboard and manually recreate"
   echo "the following buckets to ensure your app functions correctly."
   echo ""
-  echo "🎯 Target Project ID: $TARGET_ID"
-  echo "🔗 URL: https://supabase.com/dashboard/project/$TARGET_ID/storage/buckets"
+  echo "Target Project ID: $TARGET_ID"
+  echo "URL: https://supabase.com/dashboard/project/$TARGET_ID/storage/buckets"
   echo ""
   
   if [ -d "$BACKUP_DIR/storage" ]; then
     for BUCKET_PATH in "$BACKUP_DIR/storage"/*; do
       if [ -d "$BUCKET_PATH" ]; then
-        echo " 👉 $(basename "$BUCKET_PATH")"
+        echo " [] $(basename "$BUCKET_PATH")"
       fi
     done
   else
@@ -196,4 +196,4 @@ if [ "$SCHEMA_ONLY" = true ]; then
 fi
 
 echo "------------------------------------------------------------"
-echo "🎉 Full restore to $ENV_TARGET completed successfully!"
+echo "Full restore to $ENV_TARGET completed successfully!"
