@@ -111,8 +111,9 @@ echo "------------------------------------------------------------"
 echo "📦 Dumping Roles..."
 supabase db dump --db-url "$DB_URL" -f "$BACKUP_DIR/roles.sql" --keep-comments --role-only
 
+# The --schema-only flag forces the underlying pg_dump engine to rigorously scan the system catalog for all structural elements, including custom PL/pgSQL functions.
 echo "📦 Dumping Schema..."
-supabase db dump --db-url "$DB_URL" -f "$BACKUP_DIR/schema.sql"
+supabase db dump --db-url "$DB_URL" -f "$BACKUP_DIR/schema.sql" --schema-only
 
 echo "📦 Dumping Data (Excluding vector indexes)..."
 supabase db dump --db-url "$DB_URL" -f "$BACKUP_DIR/data.sql" --use-copy --data-only --exclude "storage.buckets_vectors,storage.vector_indexes"
