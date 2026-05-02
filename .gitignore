@@ -1,3 +1,4 @@
 .env
 rclone.conf
 backups/
+.temp/

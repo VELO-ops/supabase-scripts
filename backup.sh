@@ -10,12 +10,14 @@ fi
 
 # --- Parse Flags ---
 SKIP_STORAGE=false
+DEBUG_FLAG=""
 POSITIONAL_ARGS=()
 
-# Loop through all arguments passed to the script
 for arg in "$@"; do
   if [ "$arg" == "--db-only" ]; then
     SKIP_STORAGE=true
+  elif [ "$arg" == "--debug" ]; then
+    DEBUG_FLAG="--debug"
   else
     POSITIONAL_ARGS+=("$arg") # Save non-flag arguments
   fi
@@ -109,14 +111,14 @@ echo "------------------------------------------------------------"
 
 # --- 1. Database Dumps ---
 echo "📦 Dumping Roles..."
-supabase db dump --db-url "$DB_URL" -f "$BACKUP_DIR/roles.sql" --keep-comments --role-only
+supabase db dump --db-url "$DB_URL" -f "$BACKUP_DIR/roles.sql" --keep-comments --role-only $DEBUG_FLAG
 
 # The --schema-only flag forces the underlying pg_dump engine to rigorously scan the system catalog for all structural elements, including custom PL/pgSQL functions.
 echo "📦 Dumping Schema..."
-supabase db dump --db-url "$DB_URL" -f "$BACKUP_DIR/schema.sql"
+supabase db dump --db-url "$DB_URL" -f "$BACKUP_DIR/schema.sql" $DEBUG_FLAG
 
 echo "📦 Dumping Data (Excluding vector indexes)..."
-supabase db dump --db-url "$DB_URL" -f "$BACKUP_DIR/data.sql" --use-copy --data-only --exclude "storage.buckets_vectors,storage.vector_indexes"
+supabase db dump --db-url "$DB_URL" -f "$BACKUP_DIR/data.sql" --use-copy --data-only --exclude "storage.buckets_vectors,storage.vector_indexes" $DEBUG_FLAG
 
 # --- 2. Storage Backup ---
 if [ "$SKIP_STORAGE" = true ]; then
