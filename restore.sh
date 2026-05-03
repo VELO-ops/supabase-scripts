@@ -44,12 +44,10 @@ RCLONE_CONFIG="./rclone.conf"
 
 if [ "$ENV_TARGET" == "prod" ]; then
   TARGET_DB_URL=$PROD_DB_URL
-  TARGET_RCLONE_REMOTE="prod-supa"
   WARNING_MSG="🔥 DANGER: YOU ARE ABOUT TO WIPE AND OVERWRITE PRODUCTION! 🔥"
   CONFIRM_WORD="I UNDERSTAND"
 else
   TARGET_DB_URL=$TEST_DB_URL
-  TARGET_RCLONE_REMOTE="test-supa"
   WARNING_MSG="🚨 WARNING: DESTRUCTIVE RESTORE TO TEST INITIATED 🚨"
   CONFIRM_WORD="YES"
 fi
@@ -58,9 +56,33 @@ fi
 if [[ "$TARGET_DB_URL" =~ postgres\.([^:]+) ]]; then
   TARGET_ID="${BASH_REMATCH[1]}"
   echo "🔍 Auto-detected Target Project ID: $TARGET_ID"
+  
+  # 🪣 Auto-detect the correct rclone remote to prevent "split-brain" uploads
+  if [ -f "$RCLONE_CONFIG" ]; then
+    TARGET_RCLONE_REMOTE=$(awk -v id="$TARGET_ID" '
+      /^\[.*\]$/ { remote=substr($0, 2, length($0)-2) }
+      $0 ~ "endpoint.*" id { print remote; exit }
+    ' "$RCLONE_CONFIG")
+  fi
 else
   echo "❌ Error: Could not extract Project ID from the target DB URL."
   exit 1
+fi
+
+# Validate rclone remote detection (only required if we are pushing files)
+if [ -n "$TARGET_RCLONE_REMOTE" ]; then
+  echo "✨ Auto-detected rclone remote: [$TARGET_RCLONE_REMOTE]"
+else
+  if [ "$SCHEMA_ONLY" = false ]; then
+    echo "⚠️ Could not auto-detect rclone remote for target ID $TARGET_ID."
+    echo "Did you forget to add this project's S3 credentials to rclone.conf?"
+    read -p "Enter the rclone remote name manually (or press Ctrl+C to abort): " TARGET_RCLONE_REMOTE
+    
+    if [ -z "$TARGET_RCLONE_REMOTE" ]; then
+      echo "❌ Error: Rclone remote is required to restore storage files."
+      exit 1
+    fi
+  fi
 fi
 
 # --- 🚨 WARNING 🚨 ---
