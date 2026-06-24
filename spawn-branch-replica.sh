@@ -10,9 +10,12 @@ if [ -z "$BRANCH_NAME" ] || [ -z "$PROD_DB_URL" ]; then
   exit 1
 fi
 
-echo "============================================================"
-echo " 🌀 Creating Live Replica on Branch: $BRANCH_NAME"
-echo "============================================================"
+# 🚨 Guardrail: Prevent targeting main
+if [ "$BRANCH_NAME" == "main" ]; then
+  echo "❌ CRITICAL ERROR: You cannot target the 'main' branch with this script."
+  echo "This script is exclusively for ephemeral testing branches."
+  exit 1
+fi
 
 # --- 2. Extract Project ID and Rclone Remote ---
 if [[ "$PROD_DB_URL" =~ postgres\.([^:]+) ]]; then
@@ -37,23 +40,48 @@ if [ -z "$RCLONE_REMOTE" ]; then
   exit 1
 fi
 
-# --- 3. Step 1: Create the Supabase Cloud Branch ---
-echo "🏗️  Creating isolated Supabase branch on project $PROJECT_ID..."
-supabase branch create "$BRANCH_NAME" --project-ref "$PROJECT_ID"
+# --- 3. Step 1: Check or Create the Supabase Cloud Branch ---
+echo "🔍 Checking if branch '$BRANCH_NAME' already exists..."
 
-if [ $? -ne 0 ]; then
-  echo "❌ Failed to create cloud branch. Aborting."
-  exit 1
+# Query the CLI to see if a branch with this name is already in the project
+EXISTING_BRANCH=$(supabase branch list --project-ref "$PROJECT_ID" --output json 2>/dev/null | jq -r ".[] | select(.name == \"$BRANCH_NAME\") | .name")
+
+if [ "$EXISTING_BRANCH" == "$BRANCH_NAME" ]; then
+  echo "♻️  Branch '$BRANCH_NAME' already exists! Skipping creation and reusing..."
+else
+  echo "🏗️  Creating isolated Supabase branch on project $PROJECT_ID..."
+  supabase branch create "$BRANCH_NAME" --project-ref "$PROJECT_ID"
+
+  if [ $? -ne 0 ]; then
+    echo "❌ Failed to create cloud branch. Aborting."
+    exit 1
+  fi
 fi
 
 # --- 4. Step 2: Grab the New Branch's Connection Details ---
-echo "🔍 Fetching credentials for the new branch..."
-BRANCH_DB_URL=$(supabase branch list --project-ref "$PROJECT_ID" --output json | jq -r ".[] | select(.name == \"$BRANCH_NAME\") | .connectionString")
+echo "⏳ Waiting for the database branch to finish provisioning (this usually takes 1-3 minutes)..."
 
-if [ -z "$BRANCH_DB_URL" ] || [ "$BRANCH_DB_URL" == "null" ]; then
-  echo "❌ Error: Could not retrieve connection string for branch '$BRANCH_NAME'."
-  exit 1
-fi
+BRANCH_DB_URL="null"
+MAX_ATTEMPTS=60  # 60 attempts * 5 seconds = 5 minutes max timeout
+ATTEMPT=0
+
+while [ "$BRANCH_DB_URL" == "null" ] || [ -z "$BRANCH_DB_URL" ]; do
+  if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
+    echo -e "\n❌ Error: Timed out waiting for branch to finish creating."
+    exit 1
+  fi
+  
+  # Print a dot to show progress
+  echo -n "."
+  sleep 5
+  
+  # Suppress standard error just in case the CLI throws a transient warning while booting
+  BRANCH_DB_URL=$(supabase branch list --project-ref "$PROJECT_ID" --output json 2>/dev/null | jq -r ".[] | select(.name == \"$BRANCH_NAME\") | .connectionString")
+  
+  ((ATTEMPT++))
+done
+
+echo -e "\n✅ Branch provisioned! Connection string retrieved."
 
 # --- 5. Step 3: Capture Fresh Production State ---
 echo "📸 Triggering fresh production backup via 3-argument override..."
@@ -74,11 +102,21 @@ if [ -z "$PROD_BACKUP_DIR" ]; then
 fi
 
 # --- 6. Step 4: Tricking restore.sh into Populating the Branch ---
+echo "============================================================"
+read -p "⚠️  Overwrite branch '$BRANCH_NAME' with a fresh prod clone? [y/N]: " CONFIRM_RESTORE
+echo "============================================================"
+
+if [[ ! "$CONFIRM_RESTORE" =~ ^[Yy]$ ]]; then
+  echo "🛑 Restore aborted by user. The branch '$BRANCH_NAME' was not modified."
+  exit 0
+fi
+
 echo "🚀 Hydrating branch database and storage buckets..."
 
 export TEST_DB_URL="$BRANCH_DB_URL"
 
-echo "YES" | ./restore.sh test "$PROD_BACKUP_DIR"
+# We pass --skip-backup because this is a disposable branch!
+echo "YES" | ./restore.sh test "$PROD_BACKUP_DIR" --skip-backup
 
 if [ $? -eq 0 ]; then
   echo "============================================================"

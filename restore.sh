@@ -10,11 +10,14 @@ fi
 
 # --- Parse Flags ---
 SCHEMA_ONLY=false
+SKIP_BACKUP=false
 POSITIONAL_ARGS=()
 
 for arg in "$@"; do
   if [ "$arg" == "--schema-only" ]; then
     SCHEMA_ONLY=true
+  elif [ "$arg" == "--skip-backup" ]; then
+    SKIP_BACKUP=true
   else
     POSITIONAL_ARGS+=("$arg") # Save non-flag arguments
   fi
@@ -109,19 +112,25 @@ if [ "$CONFIRM" != "$CONFIRM_WORD" ]; then
 fi
 
 # --- 🛡️ SAFETY BACKUP PHASE 🛡️ ---
-echo ""
-echo "------------------------------------------------------------"
-echo "🛡️  CREATING SAFETY BACKUP OF $ENV_TARGET ENVIRONMENT..."
-echo "------------------------------------------------------------"
+if [ "$SKIP_BACKUP" = false ]; then
+  echo ""
+  echo "------------------------------------------------------------"
+  echo "🛡️  CREATING SAFETY BACKUP OF $ENV_TARGET ENVIRONMENT..."
+  echo "------------------------------------------------------------"
 
-./backup.sh "$TARGET_DB_URL" "$TARGET_RCLONE_REMOTE" "${ENV_TARGET}_pre_restore_backup"
+  ./backup.sh "$TARGET_DB_URL" "$TARGET_RCLONE_REMOTE" "${ENV_TARGET}_pre_restore_backup"
 
-if [ $? -ne 0 ]; then
-  echo "❌ Safety backup failed! Aborting to protect your environment."
-  exit 1
+  if [ $? -ne 0 ]; then
+    echo "❌ Safety backup failed! Aborting to protect your environment."
+    exit 1
+  fi
+  echo "✅ Safety backup complete!"
+  echo ""
+else
+  echo ""
+  echo "⏭️  --skip-backup flag detected. Skipping safety backup phase."
+  echo ""
 fi
-echo "✅ Safety backup complete!"
-echo ""
 
 # --- 🧹 AUTOMATED WIPE TARGET 🧹 ---
 echo "------------------------------------------------------------"
