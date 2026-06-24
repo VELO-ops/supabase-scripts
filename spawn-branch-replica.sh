@@ -44,13 +44,13 @@ fi
 echo "🔍 Checking if branch '$BRANCH_NAME' already exists..."
 
 # Query the CLI to see if a branch with this name is already in the project
-EXISTING_BRANCH=$(supabase branch list --project-ref "$PROJECT_ID" --output json 2>/dev/null | jq -r ".[] | select(.name == \"$BRANCH_NAME\") | .name")
+EXISTING_BRANCH=$(supabase branches list --project-ref "$PROJECT_ID" --output json 2>/dev/null | jq -r ".[] | select(.name == \"$BRANCH_NAME\") | .name")
 
 if [ "$EXISTING_BRANCH" == "$BRANCH_NAME" ]; then
   echo "♻️  Branch '$BRANCH_NAME' already exists! Skipping creation and reusing..."
 else
   echo "🏗️  Creating isolated Supabase branch on project $PROJECT_ID..."
-  supabase branch create "$BRANCH_NAME" --project-ref "$PROJECT_ID"
+  supabase branches create "$BRANCH_NAME" --project-ref "$PROJECT_ID"
 
   if [ $? -ne 0 ]; then
     echo "❌ Failed to create cloud branch. Aborting."
@@ -76,7 +76,7 @@ while [ "$BRANCH_DB_URL" == "null" ] || [ -z "$BRANCH_DB_URL" ]; do
   sleep 5
   
   # Suppress standard error just in case the CLI throws a transient warning while booting
-  BRANCH_DB_URL=$(supabase branch list --project-ref "$PROJECT_ID" --output json 2>/dev/null | jq -r ".[] | select(.name == \"$BRANCH_NAME\") | .connectionString")
+  BRANCH_DB_URL=$(supabase branches list --project-ref "$PROJECT_ID" --output json 2>/dev/null | jq -r ".[] | select(.name == \"$BRANCH_NAME\") | .connectionString")
   
   ((ATTEMPT++))
 done
