@@ -164,10 +164,25 @@ if [ "$DATA_ONLY" = false ]; then
     TRUNCATE storage.buckets CASCADE;
   "
 else
-  echo "⏭️  --data-only flag detected. Skipping DROP SCHEMA to preserve dashboard permissions."
+  echo "⏭️  --data-only flag detected. Truncating all data while preserving schema and permissions..."
   psql -d "$TARGET_DB_URL" -c "
     TRUNCATE auth.users CASCADE;
     TRUNCATE storage.buckets CASCADE;
+    DO \$\$
+    DECLARE
+        stmt text;
+    BEGIN
+        -- Dynamically build a TRUNCATE command for all tables in the public schema
+        SELECT 'TRUNCATE ' || string_agg(quote_ident(tablename), ', ') || ' CASCADE;'
+        INTO stmt
+        FROM pg_tables
+        WHERE schemaname = 'public';
+        
+        IF stmt IS NOT NULL THEN
+            EXECUTE stmt;
+        END IF;
+    END;
+    \$\$;
   "
 fi
 
