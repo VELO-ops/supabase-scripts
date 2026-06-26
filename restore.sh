@@ -1,11 +1,20 @@
 #!/bin/bash
 
+# --- Save Injected Variables ---
+# If a parent script (like spawn-branch-replica) passes a URL, save it before .env clobbers it
+INJECTED_TEST_URL="$TEST_DB_URL"
+
 # --- Load Environment Variables ---
 if [ -f .env ]; then
   export $(grep -v '^#' .env | xargs)
 else
   echo "❌ Error: .env file not found. Please copy sample.env to .env and configure it."
   exit 1
+fi
+
+# --- Restore Injected Variables ---
+if [ -n "$INJECTED_TEST_URL" ]; then
+  TEST_DB_URL="$INJECTED_TEST_URL"
 fi
 
 # --- Parse Flags ---
