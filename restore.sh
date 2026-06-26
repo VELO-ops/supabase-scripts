@@ -82,6 +82,7 @@ if [[ "$TARGET_DB_URL" =~ postgres\.([^:]+) ]]; then
 elif [[ "$TARGET_DB_URL" =~ 127\.0\.0\.1 ]]; then
   # Trick the script into keeping the original test URLs perfectly intact
   TARGET_ID="iahkuyfzsmihqtokfuap"
+  TARGET_RCLONE_REMOTE="test-supa"
   echo "🔍 Local database detected! Bypassing ID extraction and preserving URLs."
 else
   echo "❌ Error: Could not extract Project ID from the target DB URL."
