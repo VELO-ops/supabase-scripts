@@ -162,7 +162,11 @@ fi
 
 # --- 6. Step 4: Tricking restore.sh into Populating the Branch ---
 echo "============================================================"
-read -p "⚠️  Overwrite branch '$BRANCH_NAME' with a fresh prod clone? [y/N]: " CONFIRM_RESTORE
+echo "⚠️  WARNING: You are about to run a destructive restore."
+echo "Target Branch: $BRANCH_NAME"
+echo "Target URL:    $BRANCH_DB_URL"
+echo "============================================================"
+read -p "Overwrite this specific database with a fresh prod clone? [y/N]: " CONFIRM_RESTORE
 echo "============================================================"
 
 if [[ ! "$CONFIRM_RESTORE" =~ ^[Yy]$ ]]; then
