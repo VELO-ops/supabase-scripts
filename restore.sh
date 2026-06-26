@@ -10,12 +10,15 @@ fi
 
 # --- Parse Flags ---
 SCHEMA_ONLY=false
+DATA_ONLY=false
 SKIP_BACKUP=false
 POSITIONAL_ARGS=()
 
 for arg in "$@"; do
   if [ "$arg" == "--schema-only" ]; then
     SCHEMA_ONLY=true
+  elif [ "$arg" == "--data-only" ]; then
+    DATA_ONLY=true
   elif [ "$arg" == "--skip-backup" ]; then
     SKIP_BACKUP=true
   else
@@ -137,14 +140,22 @@ echo "------------------------------------------------------------"
 echo "🧹 WIPING $ENV_TARGET DATABASE..."
 echo "------------------------------------------------------------"
 
-psql -d "$TARGET_DB_URL" -c "
-  DROP SCHEMA IF EXISTS public CASCADE;
-  CREATE SCHEMA public;
-  GRANT ALL ON SCHEMA public TO postgres;
-  GRANT ALL ON SCHEMA public TO public;
-  TRUNCATE auth.users CASCADE;
-  TRUNCATE storage.buckets CASCADE;
-"
+if [ "$DATA_ONLY" = false ]; then
+  psql -d "$TARGET_DB_URL" -c "
+    DROP SCHEMA IF EXISTS public CASCADE;
+    CREATE SCHEMA public;
+    GRANT ALL ON SCHEMA public TO postgres;
+    GRANT ALL ON SCHEMA public TO public;
+    TRUNCATE auth.users CASCADE;
+    TRUNCATE storage.buckets CASCADE;
+  "
+else
+  echo "⏭️  --data-only flag detected. Skipping DROP SCHEMA to preserve dashboard permissions."
+  psql -d "$TARGET_DB_URL" -c "
+    TRUNCATE auth.users CASCADE;
+    TRUNCATE storage.buckets CASCADE;
+  "
+fi
 
 if [ $? -ne 0 ]; then
   echo "❌ Failed to wipe the $ENV_TARGET database. Aborting."
@@ -161,10 +172,14 @@ echo "------------------------------------------------------------"
 echo "📦 Restoring Roles..."
 psql -d "$TARGET_DB_URL" -f "$BACKUP_DIR/roles.sql"
 
-echo "🔗 Patching Webhooks in Schema and Restoring on the fly..."
-cat "$BACKUP_DIR/schema.sql" \
-  | sed -E "s/[a-z0-9]{20}\.supabase\.co/$TARGET_ID\.supabase\.co/g" \
-  | psql -d "$TARGET_DB_URL"
+if [ "$DATA_ONLY" = false ]; then
+  echo "🔗 Patching Webhooks in Schema and Restoring on the fly..."
+  cat "$BACKUP_DIR/schema.sql" \
+    | sed -E "s/[a-z0-9]{20}\.supabase\.co/$TARGET_ID\.supabase\.co/g" \
+    | psql -d "$TARGET_DB_URL"
+else
+  echo "⏭️  --data-only flag detected. Skipping Schema injection."
+fi
 
 # --- Conditional Data Injection ---
 if [ "$SCHEMA_ONLY" = false ]; then

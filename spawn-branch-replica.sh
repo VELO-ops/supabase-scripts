@@ -43,8 +43,11 @@ fi
 # --- 3. Step 1: Check or Create the Supabase Cloud Branch ---
 echo "🔍 Checking if branch '$BRANCH_NAME' already exists..."
 
-# Query the CLI to see if a branch with this name is already in the project
-EXISTING_BRANCH=$(supabase branches list --project-ref "$PROJECT_ID" --output json 2>/dev/null | jq -r ".[] | select(.name == \"$BRANCH_NAME\") | .name")
+# Fetch raw output and use sed to strip any CLI update warnings, isolating the JSON array
+RAW_CLI_OUTPUT=$(supabase branches list --project-ref "$PROJECT_ID" --output json 2>/dev/null)
+CLEAN_JSON=$(echo "$RAW_CLI_OUTPUT" | sed -n '/^\[/,/^\]/p')
+
+EXISTING_BRANCH=$(echo "$CLEAN_JSON" | jq -r ".[] | select(.name == \"$BRANCH_NAME\") | .name" 2>/dev/null)
 
 if [ "$EXISTING_BRANCH" == "$BRANCH_NAME" ]; then
   echo "♻️  Branch '$BRANCH_NAME' already exists! Skipping creation and reusing..."
@@ -59,38 +62,94 @@ else
 fi
 
 # --- 4. Step 2: Grab the New Branch's Connection Details ---
-echo "⏳ Waiting for the database branch to finish provisioning (this usually takes 1-3 minutes)..."
+echo "🔍 Fetching credentials for the new branch..."
 
-BRANCH_DB_URL="null"
-MAX_ATTEMPTS=60  # 60 attempts * 5 seconds = 5 minutes max timeout
+RAW_CLI_OUTPUT=$(supabase branches list --project-ref "$PROJECT_ID" --output json 2>/dev/null)
+CLEAN_JSON=$(echo "$RAW_CLI_OUTPUT" | sed -n '/^\[/,/^\]/p')
+
+BRANCH_ID=$(echo "$CLEAN_JSON" | jq -r ".[] | select(.name == \"$BRANCH_NAME\") | .project_ref" 2>/dev/null)
+
+if [ -z "$BRANCH_ID" ] || [ "$BRANCH_ID" == "null" ]; then
+  echo "❌ Error: Could not find branch '$BRANCH_NAME' in project '$PROJECT_ID'."
+  exit 1
+fi
+
+echo "🔑 Please enter your Supabase Database Password (the one used for this project):"
+read -s DB_PASSWORD
+echo ""
+
+ENCODED_PASSWORD=$(jq -nr --arg pwd "$DB_PASSWORD" '$pwd | @uri')
+
+# Extract Prod pooler to try first, but also prepare the default fallback pooler
+if [[ "$PROD_DB_URL" =~ @([^:/]+) ]]; then
+  PROD_POOLER="${BASH_REMATCH[1]}"
+else
+  PROD_POOLER="aws-0-us-west-2.pooler.supabase.com"
+fi
+DEFAULT_POOLER="aws-0-us-west-2.pooler.supabase.com"
+
+# --- The Direct Polling Loop ---
+echo "⏳ Testing connections..."
+
+# 🛡️ Force PostgreSQL to output in standard English so our script can read the errors
+export LANG=C
+
+MAX_ATTEMPTS=20
 ATTEMPT=0
+DB_READY=false
+BRANCH_DB_URL=""
 
-while [ "$BRANCH_DB_URL" == "null" ] || [ -z "$BRANCH_DB_URL" ]; do
+while [ "$DB_READY" = false ]; do
   if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
-    echo -e "\n❌ Error: Timed out waiting for branch to finish creating."
+    echo -e "\n❌ Error: Timed out waiting for database to wake up."
     exit 1
   fi
   
-  # Print a dot to show progress
-  echo -n "."
-  sleep 5
+  # Try both poolers
+  for HOST in "$PROD_POOLER" "$DEFAULT_POOLER"; do
+    # Ensure we use port 6543 (Session Mode) for heavy restores
+    TEST_URL="postgresql://postgres.${BRANCH_ID}:${ENCODED_PASSWORD}@${HOST}:6543/postgres"
+    
+    echo -e "\n[Attempt $((ATTEMPT+1))] Testing host: $HOST ..."
+    
+    # Increased timeout to 15s to allow for initial SSL handshakes
+    PSQL_OUTPUT=$(PGCONNECT_TIMEOUT=15 psql "$TEST_URL" -c "SELECT 1;" 2>&1)
+    PSQL_EXIT_CODE=$?
+    
+    if [ $PSQL_EXIT_CODE -eq 0 ]; then
+      BRANCH_DB_URL="$TEST_URL"
+      DB_READY=true
+      echo "✅ Connection successful!"
+      break
+    elif echo "$PSQL_OUTPUT" | grep -q "password authentication failed"; then
+      echo "❌ Error: Password authentication failed on host $HOST!"
+      echo "💡 Fix: Double-check the password you typed matches the one reset in the dashboard."
+      exit 1
+    else
+      echo "⚠️ Connection failed. Raw output from PostgreSQL:"
+      echo "$PSQL_OUTPUT"
+    fi
+  done
   
-  # Suppress standard error just in case the CLI throws a transient warning while booting
-  BRANCH_DB_URL=$(supabase branches list --project-ref "$PROJECT_ID" --output json 2>/dev/null | jq -r ".[] | select(.name == \"$BRANCH_NAME\") | .connectionString")
-  
-  ((ATTEMPT++))
+  if [ "$DB_READY" = false ]; then
+    echo "Waiting 5 seconds before retrying..."
+    sleep 5
+    ((ATTEMPT++))
+  fi
 done
 
-echo -e "\n✅ Branch provisioned! Connection string retrieved."
+echo -e "\n✅ Branch database is awake and accepting connections!"
 
 # --- 5. Step 3: Capture Fresh Production State ---
 echo "📸 Triggering fresh production backup via 3-argument override..."
-# We format the folder prefix to replace slashes in the branch name with underscores
 SAFE_BRANCH_NAME="${BRANCH_NAME//\//_}"
 FOLDER_PREFIX="${SAFE_BRANCH_NAME}_source"
 
-# Run backup.sh using the 3-argument automated override to prevent prompts
-BACKUP_OUTPUT=$(./backup.sh "$PROD_DB_URL" "$RCLONE_REMOTE" "$FOLDER_PREFIX")
+# 🛡️ Force PROD_DB_URL to use port 6543 so pg_dump doesn't fail
+PROD_DB_URL_SESSION="${PROD_DB_URL//:5432/:6543}"
+
+# Run backup.sh using the safely rewritten URL
+BACKUP_OUTPUT=$(./backup.sh "$PROD_DB_URL_SESSION" "$RCLONE_REMOTE" "$FOLDER_PREFIX")
 
 # Extract the backup directory path from the final output line
 PROD_BACKUP_DIR=$(echo "$BACKUP_OUTPUT" | grep "All files are securely saved in:" | awk '{print $NF}')
@@ -116,7 +175,8 @@ echo "🚀 Hydrating branch database and storage buckets..."
 export TEST_DB_URL="$BRANCH_DB_URL"
 
 # We pass --skip-backup because this is a disposable branch!
-echo "YES" | ./restore.sh test "$PROD_BACKUP_DIR" --skip-backup
+# We pass --data-only because Supabase Branching already built the schema perfectly!
+echo "YES" | ./restore.sh test "$PROD_BACKUP_DIR" --skip-backup --data-only
 
 if [ $? -eq 0 ]; then
   echo "============================================================"
