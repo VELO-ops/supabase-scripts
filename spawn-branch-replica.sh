@@ -3,6 +3,7 @@
 # --- 1. Validation & Input ---
 BRANCH_NAME=$1
 PROD_DB_URL=$2
+PROVIDED_BACKUP=$3
 
 if [ -z "$BRANCH_NAME" ] || [ -z "$PROD_DB_URL" ]; then
   echo "❌ Error: Missing arguments."
@@ -74,67 +75,71 @@ if [ -z "$BRANCH_ID" ] || [ "$BRANCH_ID" == "null" ]; then
   exit 1
 fi
 
-echo "🔑 Please enter your Supabase Database Password (the one used for this project):"
-read -s DB_PASSWORD
-echo ""
-
-ENCODED_PASSWORD=$(jq -nr --arg pwd "$DB_PASSWORD" '$pwd | @uri')
-
-# Extract Prod pooler to try first, but also prepare the default fallback pooler
-if [[ "$PROD_DB_URL" =~ @([^:/]+) ]]; then
-  PROD_POOLER="${BASH_REMATCH[1]}"
-else
-  PROD_POOLER="aws-0-us-west-2.pooler.supabase.com"
-fi
-DEFAULT_POOLER="aws-0-us-west-2.pooler.supabase.com"
-
-# --- The Direct Polling Loop ---
-echo "⏳ Testing connections..."
-
-# 🛡️ Force PostgreSQL to output in standard English so our script can read the errors
-export LANG=C
-
-MAX_ATTEMPTS=20
-ATTEMPT=0
+# --- The Password & Polling Loop ---
 DB_READY=false
 BRANCH_DB_URL=""
 
 while [ "$DB_READY" = false ]; do
-  if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
-    echo -e "\n❌ Error: Timed out waiting for database to wake up."
-    exit 1
+  echo "🔑 Please enter your Supabase Database Password (the one used for this project):"
+  read -s DB_PASSWORD
+  echo ""
+
+  # Safely URL-encode the password just in case it has special characters
+  ENCODED_PASSWORD=$(jq -nr --arg pwd "$DB_PASSWORD" '$pwd | @uri')
+
+  # Extract Prod pooler to try first, but also prepare the default fallback pooler
+  if [[ "$PROD_DB_URL" =~ @([^:/]+) ]]; then
+    PROD_POOLER="${BASH_REMATCH[1]}"
+  else
+    PROD_POOLER="aws-0-us-west-2.pooler.supabase.com"
   fi
-  
-  # Try both poolers
-  for HOST in "$PROD_POOLER" "$DEFAULT_POOLER"; do
-    # Ensure we use port 6543 (Session Mode) for heavy restores
-    TEST_URL="postgresql://postgres.${BRANCH_ID}:${ENCODED_PASSWORD}@${HOST}:6543/postgres"
+  DEFAULT_POOLER="aws-0-us-west-2.pooler.supabase.com"
+
+  echo "⏳ Testing connections..."
+  export LANG=C # 🛡️ Force standard English errors
+
+  MAX_ATTEMPTS=20
+  ATTEMPT=0
+  PASSWORD_FAILED=false
+
+  while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+    for HOST in "$PROD_POOLER" "$DEFAULT_POOLER"; do
+      TEST_URL="postgresql://postgres.${BRANCH_ID}:${ENCODED_PASSWORD}@${HOST}:6543/postgres"
+      echo -e "\n[Attempt $((ATTEMPT+1))] Testing host: $HOST ..."
+      
+      PSQL_OUTPUT=$(PGCONNECT_TIMEOUT=15 psql "$TEST_URL" -c "SELECT 1;" 2>&1)
+      PSQL_EXIT_CODE=$?
+      
+      if [ $PSQL_EXIT_CODE -eq 0 ]; then
+        BRANCH_DB_URL="$TEST_URL"
+        DB_READY=true
+        echo "✅ Connection successful!"
+        break 2 # Breaks out of both the HOST loop and the ATTEMPT loop
+      elif echo "$PSQL_OUTPUT" | grep -q "password authentication failed"; then
+        echo "❌ Error: Password authentication failed!"
+        PASSWORD_FAILED=true
+        break 2 # Breaks out to ask for the password again
+      else
+        echo "⚠️ Connection failed (Database might still be waking up). Raw output:"
+        echo "$PSQL_OUTPUT"
+      fi
+    done
     
-    echo -e "\n[Attempt $((ATTEMPT+1))] Testing host: $HOST ..."
-    
-    # Increased timeout to 15s to allow for initial SSL handshakes
-    PSQL_OUTPUT=$(PGCONNECT_TIMEOUT=15 psql "$TEST_URL" -c "SELECT 1;" 2>&1)
-    PSQL_EXIT_CODE=$?
-    
-    if [ $PSQL_EXIT_CODE -eq 0 ]; then
-      BRANCH_DB_URL="$TEST_URL"
-      DB_READY=true
-      echo "✅ Connection successful!"
-      break
-    elif echo "$PSQL_OUTPUT" | grep -q "password authentication failed"; then
-      echo "❌ Error: Password authentication failed on host $HOST!"
-      echo "💡 Fix: Double-check the password you typed matches the one reset in the dashboard."
-      exit 1
-    else
-      echo "⚠️ Connection failed. Raw output from PostgreSQL:"
-      echo "$PSQL_OUTPUT"
+    # If the password didn't fail, wait and try polling again
+    if [ "$DB_READY" = false ] && [ "$PASSWORD_FAILED" = false ]; then
+      echo "Waiting 5 seconds before retrying..."
+      sleep 5
+      ((ATTEMPT++))
     fi
   done
-  
-  if [ "$DB_READY" = false ]; then
-    echo "Waiting 5 seconds before retrying..."
-    sleep 5
-    ((ATTEMPT++))
+
+  if [ "$PASSWORD_FAILED" = true ]; then
+    echo "💡 Let's try typing the password again. (Press Ctrl+C to abort)"
+    echo ""
+    continue # Restarts the outermost loop to ask for the password
+  elif [ "$DB_READY" = false ]; then
+    echo -e "\n❌ Error: Timed out waiting for database to wake up."
+    exit 1
   fi
 done
 
@@ -148,8 +153,24 @@ FOLDER_PREFIX="${SAFE_BRANCH_NAME}_source"
 # 🛡️ Force PROD_DB_URL to use port 6543 so pg_dump doesn't fail
 PROD_DB_URL_SESSION="${PROD_DB_URL//:5432/:6543}"
 
-# Run backup.sh using the safely rewritten URL
-BACKUP_OUTPUT=$(./backup.sh "$PROD_DB_URL_SESSION" "$RCLONE_REMOTE" "$FOLDER_PREFIX")
+# Run backup.sh with the passed backup folder, if one was provided
+if [ -n "$PROVIDED_BACKUP" ]; then
+  if [ -d "$PROVIDED_BACKUP" ]; then
+    echo "♻️  Optional backup path provided! Skipping fresh production dump."
+    echo "📂 Using existing backup: $PROVIDED_BACKUP"
+    BACKUP_DIR="$PROVIDED_BACKUP"
+  else
+    echo "❌ Error: The provided backup path '$PROVIDED_BACKUP' does not exist."
+    exit 1
+  fi
+else
+  echo "📸 Triggering fresh production backup via 3-argument override..."
+  ./backup.sh "$PROD_DB_URL" "prod-supa" "${BRANCH_NAME}_source"
+  
+  # Assuming your script automatically finds the newest folder created by backup.sh
+  # KEEP YOUR EXISTING BACKUP FOLDER DETECTION LOGIC HERE
+  BACKUP_DIR=$(ls -td backups/${BRANCH_NAME}_source_* | head -1)
+fi
 
 # Extract the backup directory path from the final output line
 PROD_BACKUP_DIR=$(echo "$BACKUP_OUTPUT" | grep "All files are securely saved in:" | awk '{print $NF}')
