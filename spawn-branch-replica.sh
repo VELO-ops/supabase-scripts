@@ -146,38 +146,30 @@ done
 echo -e "\n✅ Branch database is awake and accepting connections!"
 
 # --- 5. Step 3: Capture Fresh Production State ---
-echo "📸 Triggering fresh production backup via 3-argument override..."
-SAFE_BRANCH_NAME="${BRANCH_NAME//\//_}"
-FOLDER_PREFIX="${SAFE_BRANCH_NAME}_source"
+TARGET_BACKUP_DIR=""
 
-# 🛡️ Force PROD_DB_URL to use port 6543 so pg_dump doesn't fail
-PROD_DB_URL_SESSION="${PROD_DB_URL//:5432/:6543}"
-
-# Run backup.sh with the passed backup folder, if one was provided
 if [ -n "$PROVIDED_BACKUP" ]; then
   if [ -d "$PROVIDED_BACKUP" ]; then
     echo "♻️  Optional backup path provided! Skipping fresh production dump."
     echo "📂 Using existing backup: $PROVIDED_BACKUP"
-    BACKUP_DIR="$PROVIDED_BACKUP"
+    TARGET_BACKUP_DIR="$PROVIDED_BACKUP"
   else
     echo "❌ Error: The provided backup path '$PROVIDED_BACKUP' does not exist."
     exit 1
   fi
 else
-  echo "📸 Triggering fresh production backup via 3-argument override..."
-  ./backup.sh "$PROD_DB_URL" "prod-supa" "${BRANCH_NAME}_source"
+  echo "📸 Triggering fresh production backup..."
+  # 🛡️ Force PROD_DB_URL to use port 6543 so pg_dump doesn't fail
+  PROD_DB_URL_SESSION="${PROD_DB_URL//:5432/:6543}"
   
-  # Assuming your script automatically finds the newest folder created by backup.sh
-  # KEEP YOUR EXISTING BACKUP FOLDER DETECTION LOGIC HERE
-  BACKUP_DIR=$(ls -td backups/${BRANCH_NAME}_source_* | head -1)
+  ./backup.sh "$PROD_DB_URL_SESSION" "prod-supa" "${BRANCH_NAME}_source"
+  
+  # Grab the most recently created backup folder for this branch
+  TARGET_BACKUP_DIR=$(ls -td backups/${BRANCH_NAME}_source_* | head -1)
 fi
 
-# Extract the backup directory path from the final output line
-PROD_BACKUP_DIR=$(echo "$BACKUP_OUTPUT" | grep "All files are securely saved in:" | awk '{print $NF}')
-
-if [ -z "$PROD_BACKUP_DIR" ]; then
-  echo "❌ Production backup failed. Output was:"
-  echo "$BACKUP_OUTPUT"
+if [ -z "$TARGET_BACKUP_DIR" ] || [ ! -d "$TARGET_BACKUP_DIR" ]; then
+  echo "❌ Error: Could not locate a valid backup directory to restore from."
   exit 1
 fi
 
@@ -201,7 +193,7 @@ export TEST_DB_URL="$BRANCH_DB_URL"
 
 # We pass --skip-backup because this is a disposable branch!
 # We pass --data-only because Supabase Branching already built the schema perfectly!
-echo "YES" | ./restore.sh test "$PROD_BACKUP_DIR" --skip-backup --data-only
+echo "YES" | ./restore.sh test "$TARGET_BACKUP_DIR" --skip-backup --data-only
 
 if [ $? -eq 0 ]; then
   echo "============================================================"
