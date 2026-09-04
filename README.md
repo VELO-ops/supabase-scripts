@@ -1,10 +1,12 @@
 # Supabase Backup & Restore Toolkit
 
-This toolkit provides automated, DRY scripts to safely backup and restore an entire Supabase project. It handles the PostgreSQL database (Roles, Schema, Rows) via the Supabase CLI, and all S3-compatible physical storage files via `rclone`.
+This toolkit provides automated, DRY scripts to safely backup and restore an entire Supabase project. It handles the PostgreSQL database (Roles, Schema, Migration History, Rows) via the Supabase CLI & `psql`, and all S3-compatible physical storage files via `rclone`.
 
 ## Key Features
 
 - **Infinite Scaling:** Backup Prod, Test, or _any_ custom Supabase project on the fly just by providing its database URL.
+- **Migration History Parity:** Dumps and restores the `supabase_migrations.schema_migrations` tracking table so subsequent `supabase db push` commands seamlessly apply only new migrations.
+- **Legacy Backup Compatibility:** Automatically detects legacy backups (missing `migrations.sql`) and synthesizes migration tracking from your local migrations or a reference database.
 - **Smart Remote Detection:** Automatically parses your DB URL to find the matching S3 credentials in your `rclone.conf`.
 - **Universal URL Patching:** Uses Regex to dynamically rewrite _any_ Supabase project ID (in file URLs, Webhooks, or API endpoints) during a restore to perfectly match the target environment.
 - **Automated Safety Nets:** Restores automatically trigger a pre-restore safety snapshot of the target environment before executing.
@@ -72,7 +74,7 @@ Run the script with no arguments to be prompted for an environment or a custom d
 
 ### Backup Flags
 
-Add `--db-only` anywhere in your command to skip the physical S3 storage sync and only snapshot your database (Roles, Schema, and Data).
+Add `--db-only` anywhere in your command to skip the physical S3 storage sync and only snapshot your database (Roles, Schema, Migration History, and Data).
 
 ```bash
 ./backup.sh prod --db-only
@@ -95,7 +97,7 @@ You can restore a backup to its original environment, or cross-migrate data betw
 
 ### Restore Flags
 
-Add `--schema-only` to inject the pure structure of your database (Roles, Schema, Constraints, Webhooks) while explicitly skipping dummy table rows and dummy S3 images. Perfect for pre-launch production syncing!
+Add `--schema-only` to inject the pure structure of your database (Roles, Schema, Migration History, Constraints, Webhooks) while explicitly skipping dummy table rows and dummy S3 images. Perfect for pre-launch production syncing!
 
 ```bash
 ./restore.sh prod ./backups/test_backup_XYZ --schema-only
@@ -107,6 +109,7 @@ Add `--schema-only` to inject the pure structure of your database (Roles, Schema
 
 1. **Confirmation:** Prompts to ensure you intend to overwrite the target.
 2. **Safety Snapshot:** Automatically backs up the current state of the target environment to `./backups/target_pre_restore_backup_...`.
-3. **Automated Wipe:** Safely drops the target's public schema and truncates auth and storage tables.
+3. **Automated Wipe:** Safely drops the target's public schema, clears `supabase_migrations.schema_migrations`, and truncates auth and storage tables.
 4. **Universal URL Patching & Injection:** Streams the `.sql` schema and data directly into the database. While in memory, it uses Regex to hunt down any old Supabase domains (in webhooks, text columns, or JSON objects) and rewrites them to match the new target environment.
-5. **Physical Sync:** Syncs physical S3 files, forcefully resolving any orphaned metadata.
+5. **Migration History Synchronization:** Restores `migrations.sql` (or prompts to synthesize it for legacy backups), ensuring `supabase db push` will only apply new migrations.
+6. **Physical Sync:** Syncs physical S3 files, forcefully resolving any orphaned metadata.

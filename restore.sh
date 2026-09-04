@@ -162,6 +162,16 @@ if [ "$DATA_ONLY" = false ]; then
     GRANT ALL ON SCHEMA public TO public;
     TRUNCATE auth.users CASCADE;
     TRUNCATE storage.buckets CASCADE;
+    DO \$\$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.tables 
+        WHERE table_schema = 'supabase_migrations' AND table_name = 'schema_migrations'
+      ) THEN
+        TRUNCATE TABLE supabase_migrations.schema_migrations CASCADE;
+      END IF;
+    END;
+    \$\$;
   "
 else
   echo "⏭️  --data-only flag detected. Truncating all data while preserving schema and permissions..."
@@ -208,6 +218,176 @@ if [ "$DATA_ONLY" = false ]; then
     | psql -d "$TARGET_DB_URL"
 else
   echo "⏭️  --data-only flag detected. Skipping Schema injection."
+fi
+
+# --- Migration History Injection ---
+echo "------------------------------------------------------------"
+echo "📦 Restoring Migration History..."
+
+if [ -f "$BACKUP_DIR/migrations.sql" ]; then
+  psql -d "$TARGET_DB_URL" -f "$BACKUP_DIR/migrations.sql"
+  MIGRATION_COUNT=$(grep -c "^INSERT INTO" "$BACKUP_DIR/migrations.sql" 2>/dev/null || echo 0)
+  echo "✅ Injected $MIGRATION_COUNT migration record(s) into supabase_migrations.schema_migrations"
+else
+  echo "⚠️  LEGACY BACKUP DETECTED: No 'migrations.sql' found in this backup folder."
+
+  MIGRATIONS_DIR=""
+  # Check common candidate migration directories
+  for candidate in "./supabase/migrations" "../supabase/migrations" "./PERSONAL/pending-migrations"; do
+    if [ -d "$candidate" ] && [ -n "$(ls -A "$candidate"/*.sql 2>/dev/null)" ]; then
+      MIGRATIONS_DIR="$candidate"
+      break
+    fi
+  done
+
+  SYNTHESIZE_FROM_DIR=false
+
+  if [ -n "$MIGRATIONS_DIR" ]; then
+    FOUND_COUNT=$(ls -1 "$MIGRATIONS_DIR"/*.sql 2>/dev/null | wc -l)
+    echo "🔍 Found $FOUND_COUNT migration file(s) in: $MIGRATIONS_DIR"
+    read -p "Would you like to mark these local migrations as applied on $ENV_TARGET? [Y/n]: " SYNC_MIGRATIONS
+    if [[ "$SYNC_MIGRATIONS" =~ ^[Yy]$ || -z "$SYNC_MIGRATIONS" ]]; then
+      SYNTHESIZE_FROM_DIR=true
+    fi
+  else
+    echo ""
+    echo "How would you like to handle migration tracking for this restored database?"
+    echo "  [1] Enter a custom path to your migrations folder (e.g., ../app/supabase/migrations)"
+    echo "  [2] Pull migration history directly from a reference database (e.g., Prod)"
+    echo "  [3] Skip migration history restoration (Default)"
+    read -p "Enter choice [1/2/3]: " MIG_CHOICE
+
+    if [ "$MIG_CHOICE" == "1" ]; then
+      read -p "Enter path to migrations folder: " CUSTOM_MIG_DIR
+      if [ -d "$CUSTOM_MIG_DIR" ] && [ -n "$(ls -A "$CUSTOM_MIG_DIR"/*.sql 2>/dev/null)" ]; then
+        MIGRATIONS_DIR="$CUSTOM_MIG_DIR"
+        SYNTHESIZE_FROM_DIR=true
+      else
+        echo "❌ Directory not found or contains no .sql files."
+      fi
+    elif [ "$MIG_CHOICE" == "2" ]; then
+      read -p "Enter reference Database URL [press Enter for PROD_DB_URL]: " REF_DB_URL
+      REF_DB_URL=${REF_DB_URL:-$PROD_DB_URL}
+      if [ -n "$REF_DB_URL" ]; then
+        echo "📥 Fetching migration history from reference database..."
+        
+        MIGS_EXIST=$(psql -d "$REF_DB_URL" -t -A -c "
+          SELECT EXISTS (
+            SELECT 1 FROM information_schema.tables 
+            WHERE table_schema = 'supabase_migrations' 
+            AND table_name = 'schema_migrations'
+          );
+        " 2>/dev/null)
+
+        if [ "$MIGS_EXIST" == "t" ]; then
+          cat << 'EOF' > "$BACKUP_DIR/migrations.sql"
+--
+-- Supabase Migration History (Fetched from reference database)
+--
+
+CREATE SCHEMA IF NOT EXISTS supabase_migrations;
+
+ALTER SCHEMA supabase_migrations OWNER TO postgres;
+
+CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (
+    version text NOT NULL PRIMARY KEY,
+    statements text[],
+    name text
+);
+
+ALTER TABLE supabase_migrations.schema_migrations OWNER TO postgres;
+
+GRANT ALL ON SCHEMA supabase_migrations TO postgres, anon, authenticated, service_role;
+GRANT ALL ON ALL TABLES IN SCHEMA supabase_migrations TO postgres, anon, authenticated, service_role;
+
+EOF
+
+          psql -d "$REF_DB_URL" -t -A -c "
+            SELECT format(
+              'INSERT INTO supabase_migrations.schema_migrations (version, name, statements) VALUES (%L, %L, %s) ON CONFLICT (version) DO NOTHING;',
+              version,
+              name,
+              CASE 
+                WHEN statements IS NULL THEN 'NULL'
+                ELSE 'ARRAY[' || COALESCE((
+                  SELECT string_agg(quote_literal(s), ', ')
+                  FROM unnest(statements) AS s
+                ), '') || ']::text[]'
+              END
+            )
+            FROM supabase_migrations.schema_migrations
+            ORDER BY version ASC;
+          " >> "$BACKUP_DIR/migrations.sql" 2>/dev/null
+
+          psql -d "$TARGET_DB_URL" -f "$BACKUP_DIR/migrations.sql"
+          MIG_FETCH_COUNT=$(grep -c "^INSERT INTO" "$BACKUP_DIR/migrations.sql" 2>/dev/null || echo 0)
+          echo "✅ Injected $MIG_FETCH_COUNT migration record(s) into $ENV_TARGET!"
+          echo "💾 Saved 'migrations.sql' into $BACKUP_DIR for future restores."
+        else
+          echo "⚠️ Reference database does not contain supabase_migrations.schema_migrations."
+        fi
+      else
+        echo "❌ No reference database URL provided."
+      fi
+    fi
+  fi
+
+  if [ "$SYNTHESIZE_FROM_DIR" = true ] && [ -n "$MIGRATIONS_DIR" ]; then
+    echo "🛠️  Synthesizing migrations.sql from $MIGRATIONS_DIR..."
+    cat << 'EOF' > "$BACKUP_DIR/migrations.sql"
+--
+-- Supabase Migration History (Synthesized from local migration files)
+--
+
+CREATE SCHEMA IF NOT EXISTS supabase_migrations;
+
+ALTER SCHEMA supabase_migrations OWNER TO postgres;
+
+CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (
+    version text NOT NULL PRIMARY KEY,
+    statements text[],
+    name text
+);
+
+ALTER TABLE supabase_migrations.schema_migrations OWNER TO postgres;
+
+GRANT ALL ON SCHEMA supabase_migrations TO postgres, anon, authenticated, service_role;
+GRANT ALL ON ALL TABLES IN SCHEMA supabase_migrations TO postgres, anon, authenticated, service_role;
+
+EOF
+
+    for sql_file in "$MIGRATIONS_DIR"/*.sql; do
+      filename=$(basename "$sql_file")
+      if [[ "$filename" =~ ^([0-9]{14})_(.+)\.sql$ ]]; then
+        version="${BASH_REMATCH[1]}"
+        name="${BASH_REMATCH[2]}"
+        name_clean="${name//\'/\'\'}"
+        echo "INSERT INTO supabase_migrations.schema_migrations (version, name) VALUES ('$version', '$name_clean') ON CONFLICT (version) DO NOTHING;" >> "$BACKUP_DIR/migrations.sql"
+      elif [[ "$filename" =~ ^([0-9]+)_(.+)\.sql$ ]]; then
+        version="${BASH_REMATCH[1]}"
+        name="${BASH_REMATCH[2]}"
+        name_clean="${name//\'/\'\'}"
+        echo "INSERT INTO supabase_migrations.schema_migrations (version, name) VALUES ('$version', '$name_clean') ON CONFLICT (version) DO NOTHING;" >> "$BACKUP_DIR/migrations.sql"
+      elif [[ "$filename" =~ ^([0-9]+)\.sql$ ]]; then
+        version="${BASH_REMATCH[1]}"
+        echo "INSERT INTO supabase_migrations.schema_migrations (version) VALUES ('$version') ON CONFLICT (version) DO NOTHING;" >> "$BACKUP_DIR/migrations.sql"
+      fi
+    done
+
+    psql -d "$TARGET_DB_URL" -f "$BACKUP_DIR/migrations.sql"
+    SYNTH_COUNT=$(grep -c "^INSERT INTO" "$BACKUP_DIR/migrations.sql" 2>/dev/null || echo 0)
+    echo "✅ Successfully synthesized and injected $SYNTH_COUNT migration record(s) into $ENV_TARGET!"
+    echo "💾 Saved 'migrations.sql' into $BACKUP_DIR for future restores."
+  fi
+
+  if [ ! -f "$BACKUP_DIR/migrations.sql" ]; then
+    echo "------------------------------------------------------------"
+    echo "ℹ️  NOTE: Target database restored without migration history."
+    echo "If you run 'supabase db push' in the future, you can mark existing"
+    echo "migrations as applied using:"
+    echo "  supabase migration repair --status applied <version>"
+    echo "------------------------------------------------------------"
+  fi
 fi
 
 # --- Conditional Data Injection ---

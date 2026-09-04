@@ -120,6 +120,104 @@ supabase db dump --db-url "$DB_URL" -f "$BACKUP_DIR/schema.sql" $DEBUG_FLAG
 echo "📦 Dumping Data (Excluding vector indexes)..."
 supabase db dump --db-url "$DB_URL" -f "$BACKUP_DIR/data.sql" --use-copy --data-only --exclude "storage.buckets_vectors,storage.vector_indexes" $DEBUG_FLAG
 
+# --- 1.1 Migration History Dump ---
+echo "📦 Dumping Migration History..."
+MIGRATIONS_EXIST=$(psql -d "$DB_URL" -t -A -c "
+  SELECT EXISTS (
+    SELECT 1 FROM information_schema.tables 
+    WHERE table_schema = 'supabase_migrations' 
+    AND table_name = 'schema_migrations'
+  );
+" 2>/dev/null)
+
+if [ "$MIGRATIONS_EXIST" == "t" ]; then
+  HAS_STATEMENTS=$(psql -d "$DB_URL" -t -A -c "
+    SELECT EXISTS (
+      SELECT 1 FROM information_schema.columns 
+      WHERE table_schema = 'supabase_migrations' 
+      AND table_name = 'schema_migrations' 
+      AND column_name = 'statements'
+    );
+  " 2>/dev/null)
+
+  HAS_NAME=$(psql -d "$DB_URL" -t -A -c "
+    SELECT EXISTS (
+      SELECT 1 FROM information_schema.columns 
+      WHERE table_schema = 'supabase_migrations' 
+      AND table_name = 'schema_migrations' 
+      AND column_name = 'name'
+    );
+  " 2>/dev/null)
+
+  cat << 'EOF' > "$BACKUP_DIR/migrations.sql"
+--
+-- Supabase Migration History Dump
+--
+
+CREATE SCHEMA IF NOT EXISTS supabase_migrations;
+
+ALTER SCHEMA supabase_migrations OWNER TO postgres;
+
+CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (
+    version text NOT NULL PRIMARY KEY,
+    statements text[],
+    name text
+);
+
+ALTER TABLE supabase_migrations.schema_migrations OWNER TO postgres;
+
+GRANT ALL ON SCHEMA supabase_migrations TO postgres;
+GRANT ALL ON SCHEMA supabase_migrations TO anon;
+GRANT ALL ON SCHEMA supabase_migrations TO authenticated;
+GRANT ALL ON SCHEMA supabase_migrations TO service_role;
+GRANT ALL ON ALL TABLES IN SCHEMA supabase_migrations TO postgres, anon, authenticated, service_role;
+
+EOF
+
+  if [ "$HAS_STATEMENTS" == "t" ] && [ "$HAS_NAME" == "t" ]; then
+    psql -d "$DB_URL" -t -A -c "
+      SELECT format(
+        'INSERT INTO supabase_migrations.schema_migrations (version, name, statements) VALUES (%L, %L, %s) ON CONFLICT (version) DO NOTHING;',
+        version,
+        name,
+        CASE 
+          WHEN statements IS NULL THEN 'NULL'
+          ELSE 'ARRAY[' || COALESCE((
+            SELECT string_agg(quote_literal(s), ', ')
+            FROM unnest(statements) AS s
+          ), '') || ']::text[]'
+        END
+      )
+      FROM supabase_migrations.schema_migrations
+      ORDER BY version ASC;
+    " >> "$BACKUP_DIR/migrations.sql" 2>/dev/null
+  elif [ "$HAS_NAME" == "t" ]; then
+    psql -d "$DB_URL" -t -A -c "
+      SELECT format(
+        'INSERT INTO supabase_migrations.schema_migrations (version, name) VALUES (%L, %L) ON CONFLICT (version) DO NOTHING;',
+        version,
+        name
+      )
+      FROM supabase_migrations.schema_migrations
+      ORDER BY version ASC;
+    " >> "$BACKUP_DIR/migrations.sql" 2>/dev/null
+  else
+    psql -d "$DB_URL" -t -A -c "
+      SELECT format(
+        'INSERT INTO supabase_migrations.schema_migrations (version) VALUES (%L) ON CONFLICT (version) DO NOTHING;',
+        version
+      )
+      FROM supabase_migrations.schema_migrations
+      ORDER BY version ASC;
+    " >> "$BACKUP_DIR/migrations.sql" 2>/dev/null
+  fi
+
+  MIGRATION_COUNT=$(grep -c "^INSERT INTO" "$BACKUP_DIR/migrations.sql" 2>/dev/null || echo 0)
+  echo "✅ Dumped $MIGRATION_COUNT migration record(s) to migrations.sql"
+else
+  echo "⚠️ No migration history found in database (supabase_migrations.schema_migrations missing). Skipping."
+fi
+
 # --- 2. Storage Backup ---
 if [ "$SKIP_STORAGE" = true ]; then
   echo "------------------------------------------------------------"

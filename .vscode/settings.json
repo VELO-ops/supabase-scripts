@@ -1,3 +1,6 @@
 {
-  "conventionalCommits.scopes": ["spawn branch script"]
+  "conventionalCommits.scopes": [
+    "spawn branch script",
+    "backups and restorations"
+  ]
 }
