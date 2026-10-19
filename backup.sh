@@ -48,50 +48,56 @@ else
   fi
 
   # Route based on input
+  # DEFAULT_REMOTE is only a fallback (e.g. local DBs); the remote is auto-detected from the DB URL below
   if [ "$ENV_INPUT" == "test" ]; then
     DB_URL=$TEST_DB_URL
-    RCLONE_REMOTE="test-supa"
+    DEFAULT_REMOTE="test-supa"
     FOLDER_PREFIX="test_backup"
   elif [ "$ENV_INPUT" == "prod" ]; then
     DB_URL=$PROD_DB_URL
-    RCLONE_REMOTE="prod-supa"
+    DEFAULT_REMOTE="prod-supa"
     FOLDER_PREFIX="prod_backup"
   elif [[ "$ENV_INPUT" == postgresql://* ]]; then
     DB_URL=$ENV_INPUT
     echo ""
     echo "🔗 Custom Database URL detected."
-
-    # 1. Extract Project ID from the Postgres URL
-    if [[ "$DB_URL" =~ postgres\.([^:]+) ]]; then
-      PROJECT_ID="${BASH_REMATCH[1]}"
-      echo "🔍 Extracted Project ID: $PROJECT_ID"
-      
-      # 2. Search rclone.conf for the remote that has this Project ID in its endpoint
-      if [ -f "$RCLONE_CONFIG" ]; then
-        AUTO_REMOTE=$(awk -v id="$PROJECT_ID" '
-          /^\[.*\]$/ { remote=substr($0, 2, length($0)-2) }
-          $0 ~ "endpoint.*" id { print remote; exit }
-        ' "$RCLONE_CONFIG")
-      fi
-    fi
-
-    # 3. Apply the detected remote or fallback to a manual prompt
-    if [ -n "$AUTO_REMOTE" ]; then
-      echo "✨ Auto-detected rclone remote: [$AUTO_REMOTE]"
-      RCLONE_REMOTE=$AUTO_REMOTE
-    else
-      echo "⚠️ Could not auto-detect rclone remote. Did you add it to rclone.conf?"
-      read -p "Enter the rclone remote name manually (e.g., clientA-supa): " RCLONE_REMOTE
-    fi
-
-    read -p "Enter a prefix for the backup folder (e.g., clientA_backup): " FOLDER_PREFIX
-    
-    if [ -z "$RCLONE_REMOTE" ] || [ -z "$FOLDER_PREFIX" ]; then
-      echo "❌ Error: Rclone remote and folder prefix are required."
-      exit 1
-    fi
   else
     echo "❌ Error: Invalid input. Must be 'prod', 'test', or a valid postgresql:// URL."
+    exit 1
+  fi
+
+  # 1. Extract Project ID from the Postgres URL
+  if [[ "$DB_URL" =~ postgres\.([^:]+) ]]; then
+    PROJECT_ID="${BASH_REMATCH[1]}"
+    echo "🔍 Extracted Project ID: $PROJECT_ID"
+
+    # 2. Search rclone.conf for the remote that has this Project ID in its endpoint
+    if [ -f "$RCLONE_CONFIG" ]; then
+      AUTO_REMOTE=$(awk -v id="$PROJECT_ID" '
+        /^\[.*\]$/ { remote=substr($0, 2, length($0)-2) }
+        $0 ~ "endpoint.*" id { print remote; exit }
+      ' "$RCLONE_CONFIG")
+    fi
+  fi
+
+  # 3. Apply the detected remote, else the environment default, else a manual prompt
+  if [ -n "$AUTO_REMOTE" ]; then
+    echo "✨ Auto-detected rclone remote: [$AUTO_REMOTE]"
+    RCLONE_REMOTE=$AUTO_REMOTE
+  elif [ -n "$DEFAULT_REMOTE" ]; then
+    echo "⚠️ Could not auto-detect rclone remote. Falling back to [$DEFAULT_REMOTE]."
+    RCLONE_REMOTE=$DEFAULT_REMOTE
+  else
+    echo "⚠️ Could not auto-detect rclone remote. Did you add it to rclone.conf?"
+    read -p "Enter the rclone remote name manually (e.g., clientA-supa): " RCLONE_REMOTE
+  fi
+
+  if [ -z "$FOLDER_PREFIX" ]; then
+    read -p "Enter a prefix for the backup folder (e.g., clientA_backup): " FOLDER_PREFIX
+  fi
+
+  if [ -z "$RCLONE_REMOTE" ] || [ -z "$FOLDER_PREFIX" ]; then
+    echo "❌ Error: Rclone remote and folder prefix are required."
     exit 1
   fi
 fi
